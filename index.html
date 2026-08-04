@@ -44,6 +44,10 @@
   .btn.cup{background:linear-gradient(180deg,#ff8fc0,#d1447f);color:#3a0820}
   .btn.cont{background:linear-gradient(180deg,#7be3a4,#3fa96a);color:#062615}
   .btn.sm{padding:7px 11px;width:auto;font-size:12px}
+  /* compact action buttons that live inside table rows without overflowing a phone */
+  .btn.tiny{padding:5px 8px;width:auto;font-size:11px;white-space:nowrap;min-width:0;line-height:1.1}
+  td.act{padding:5px 2px;white-space:nowrap}
+  td.act .btn{margin:0}
   .btn:disabled{opacity:.4;cursor:not-allowed}
   select,input[type=text]{background:var(--panel2);color:var(--parch);border:1px solid var(--line);
     border-radius:6px;padding:8px;font-size:13px;width:100%;font-family:inherit}
@@ -468,6 +472,7 @@ function squadFull(t){return((t&&t.squad)||[]).length>=SQUAD_MAX;}
 function addToAcademy(t,p){
  if(!t.academy)t.academy=[];
  if(academyFull(t))return false;
+ if(p.team!==t.id)joinClub(p,t.id);      // an academy spell counts as time at the club
  t.squad=t.squad.filter(id=>id!==p.id);
  if(!t.academy.includes(p.id))t.academy.push(p.id);
  p.team=t.id;return true;
@@ -482,6 +487,25 @@ function promoteFromAcademy(t,p){
 function releaseFromAcademy(t,p){
  if(t.academy)t.academy=t.academy.filter(id=>id!==p.id);
  p.team=null;if(!G.freeAgents.includes(p.id))G.freeAgents.push(p.id);
+}
+/* A prospect his own club can't fit is not simply discarded: smaller clubs are glad of
+   him. Find a club with a senior slot (or academy room if he is still young enough) and
+   place him there, weakest-first so talent flows down the pyramid rather than vanishing.
+   Falls back to free agency only if genuinely nobody has room. */
+function placeReleasedYouth(p,fromId){
+ if(!p)return null;
+ const wants=G.teams.filter(b=>b.id!==fromId&&b.id!==G.userTeam&&!squadFull(b))
+   .sort((a,b)=>(a.prestige||0)-(b.prestige||0));   // weaker clubs get first pick
+ const suitor=wants.find(b=>{
+   if(b.trait==="local"&&p.region!==b.region)return false;
+   return true;
+ })||wants[0];
+ if(!suitor)return null;
+ detachPlayer(p);
+ joinClub(p,suitor.id);p.team=suitor.id;suitor.squad.push(p.id);
+ p.wage=wageOf(p);p.contract=newContractYears();
+ delete p.unhappySince;delete p.promised;
+ return suitor;
 }
 function squadWage(t){return squadOf(t).reduce((s,p)=>s+p.wage,0);}
 function staffWage(){let s=0;for(const r in G.myStaff){const st=G.myStaff[r];if(st)s+=STAFF_WAGE[st.stars]}
@@ -545,7 +569,8 @@ function genWorld(ownerName){
      const per=PER_TIER*cnt;
      for(let tier=0;tier<3;tier++){
        const block=list.slice(tier*per,tier*per+per);
-       block.forEach((p,i)=>{const t=clubTeams[tier*PER_TIER+(i%PER_TIER)];p.team=t.id;t.squad.push(p.id)});
+       block.forEach((p,i)=>{const t=clubTeams[tier*PER_TIER+(i%PER_TIER)];p.team=t.id;t.squad.push(p.id);
+         (p.history=p.history||[]).push({club:t.name,in:1,gcAt:0,acAt:0});});
      }
      list.slice(3*per).forEach(p=>{p.team=null;freeAgents.push(p.id)});
    }
@@ -557,6 +582,7 @@ function genWorld(ownerName){
        const pos=pick(["GK","DEF","DEF","MID","MID","FWD"]);
        const p=newPlayer(pid++,pos,ri(16,21),reg.key);
        p.team=t.id;t.academy.push(p.id);players.push(p);
+       p.history=[{club:t.name,in:1,gcAt:0,acAt:0}];
      }
    });
  });
@@ -704,7 +730,7 @@ function hydrateLoadedG(){
  // seed frozen club scorer records so departed legends persist (Update 4)
  G.teams.forEach(t=>{if(!t.scorers){t.scorers={};
    squadOf(t).forEach(p=>{if(p&&(p.gc||0)>0)t.scorers[p.id]={name:p.name,pos:p.pos,goals:p.gc};});}});
- if(G.matchday===0&&(!G.window||G.window.day>3)){G.window={day:1,offersMade:0};G.badgeStats=G.badgeStats||{};G.badgeStats.windowSigns=0;if(typeof genOffers==="function")genOffers();}
+ if(G.matchday===0&&(!G.window||G.window.day>3)){G.window={day:1,offersMade:0};G.badgeStats=G.badgeStats||{};G.badgeStats.windowSigns=0;G.badgeStats.windowSales=0;if(typeof genOffers==="function")genOffers();}
  if(!G.window)G.window={day:4,offersMade:0};
  if(!G.offers)G.offers=[];
  if(G.userTeam!==null&&!G.teams.find(t=>t.id===G.userTeam)){
@@ -1450,7 +1476,7 @@ const BADGES=[
  {id:"top_flight",name:"Top Flight",desc:"Reach the top division in your region",f:(t)=>t.tier===0},
  {id:"invincibles",name:"Invincibles",desc:"Go a full league season unbeaten"},
  {id:"three_peat",name:"Three-Peat",desc:"Win your division three seasons in a row",f:(t,x)=>x.leagueRun>=3},
- {id:"dynasty",name:"Dynasty",desc:"Win 5 league titles with the same club",f:(t)=>(t.leagueTitles||0)>=5},
+ {id:"dynasty",name:"Dynasty",desc:"Win 5 league titles",f:(t)=>(t.leagueTitles||0)>=5},
  {id:"streak_15",name:"Fifteen in a Row",desc:"Win 15 consecutive league titles",f:(t,x)=>x.leagueRun>=15},
  {id:"streak_20",name:"Twenty in a Row",desc:"Win 20 consecutive league titles",f:(t,x)=>x.leagueRun>=20},
  {id:"streak_50",name:"Half-Century Streak",desc:"Win 50 consecutive league titles",f:(t,x)=>x.leagueRun>=50},
@@ -1514,7 +1540,7 @@ const BADGES=[
  {id:"frequent_flyers",name:"Frequent Flyers",desc:"Own a team jet and keep upkeep paid 5 seasons"},
  {id:"twelfth_man",name:"12th Man",desc:"Hire a supporters\u2019 coordinator and keep them 5 seasons"},
  {id:"full_suite",name:"Full Suite",desc:"Own max stadium + Gold facility + jet + supporters",f:(t,x)=>x.fullSuite},
- {id:"infra_dynasty",name:"Infrastructure Dynasty",desc:"Complete every stadium tier with the same club",f:(t,x)=>x.maxStadium},
+ {id:"infra_dynasty",name:"Infrastructure Dynasty",desc:"Complete every stadium tier",f:(t,x)=>x.maxStadium},
  {id:"away_specialists",name:"Away Day Specialists",desc:"Win 7 away league matches in a season with the jet active"},
  // coaches & staff
  {id:"first_coach",name:"First Appointment",desc:"Hire your first head coach"},
@@ -1539,12 +1565,26 @@ const BADGES=[
  {id:"scout_network",name:"Scout Network",desc:"Scout 10 different clubs in one season"},
  {id:"zero_releases",name:"Zero Releases",desc:"Go 5 seasons without releasing a player"},
  {id:"academy_pipeline",name:"Academy Pipeline",desc:"Develop 5 under-21s to 80+ OVR"},
+ /* ---- Empire FC 2: academy, squad management and the transfer market ---- */
+ {id:"first_promotion",name:"Blooded",desc:"Promote a prospect from your academy into the senior squad"},
+ {id:"academy_full",name:"Production Line",desc:"Fill your academy to all 20 places"},
+ {id:"academy_gem",name:"Diamond in the Rough",desc:"Have an academy prospect with 90+ potential on your books"},
+ {id:"academy_star",name:"Made Here",desc:"Develop an academy graduate to 85+ OVR at your club"},
+ {id:"homegrown_xi",name:"Class of the Academy",desc:"Field a starting XI with 5+ academy graduates"},
+ {id:"kept_promise",name:"Man of Your Word",desc:"Promise a player minutes and deliver them"},
+ {id:"broken_promise",name:"Empty Words",desc:"Promise a player minutes and let him walk out on you"},
+ {id:"no_requests",name:"Happy Camp",desc:"Complete a season with nobody asking to leave"},
+ {id:"fire_sale",name:"Fire Sale",desc:"Sell 3 players in a single transfer window"},
+ {id:"big_spender",name:"Statement Signing",desc:"Pay \u00A3100M or more for a single player"},
+ {id:"wage_bill",name:"Golden Handcuffs",desc:"Carry a squad wage bill above \u00A3500k a week"},
+ {id:"loyal_one_club",name:"One-Club Man",desc:"Have a player make 200 appearances for you and nobody else"},
+ {id:"sold_and_regret",name:"The One That Got Away",desc:"Sell a player who later becomes the universe GOAT"},
  // prestige & longevity
  {id:"rising_power",name:"Rising Power",desc:"Reach 50 prestige",f:(t)=>(t.prestige||0)>=50},
  {id:"global_elite",name:"Global Elite",desc:"Reach 80 prestige",f:(t)=>(t.prestige||0)>=80},
  {id:"universe_1",name:"Universe #1",desc:"Hold the #1 prestige ranking in the world",f:(t,x)=>x.rank1},
- {id:"century_club",name:"Century Club",desc:"Manage the same club for 100 seasons",f:()=>G.season>=100},
- {id:"sim_100",name:"The Long Game",desc:"Reach season 100",f:()=>G.season>=100},
+ {id:"century_club",name:"Century Club",desc:"Reach 100 seasons as president",f:()=>G.season>=100},
+ {id:"sim_100",name:"The Long Game",desc:"Reach 50 seasons as president",f:()=>G.season>=50},
  {id:"phoenix",name:"Phoenix",desc:"Fall to tier 3 and climb back to Conrad champions"},
  {id:"next_man_up",name:"Next Man Up",desc:"Win the very next match after a first-team player is called away by an off-field crisis"},
  {id:"clean_books",name:"Clean Books",desc:"Never go into the red across a 10-season span"},
@@ -1567,6 +1607,21 @@ function checkBadges(){
  // badges that lean on tracked stats
  const bs=G.badgeStats||{};
  if(bs.hitBottom&&(t.contTitles||0)>=1)awardBadge("phoenix");
+ // ---- Empire FC 2 squad/academy/market badges ----
+ if((t.academy||[]).length>=ACADEMY_MAX)awardBadge("academy_full");
+ if(academyOf(t).some(p=>p.pot>=90))awardBadge("academy_gem");
+ {const bill=squadWage(t);if(bill>=500000)awardBadge("wage_bill");}
+ // academy graduates: a player whose career began at your club
+ const grads=squadOf(t).filter(p=>p&&(p.history||[]).length&&p.history[0].club===t.name);
+ if(grads.some(p=>p.ovr>=85))awardBadge("academy_star");
+ if((G.xi||[]).map(P).filter(p=>p&&(p.history||[]).length&&p.history[0].club===t.name).length>=5)
+   awardBadge("homegrown_xi");
+ if(squadOf(t).some(p=>p&&(p.ac||0)>=200&&(p.history||[]).length===1&&p.history[0].club===t.name))
+   awardBadge("loyal_one_club");
+ // a player you sold who went on to become the best in the world
+ {const g=universeGoatId();
+  if(g!=null){const gp=P(g);
+    if(gp&&gp.team!==t.id&&(gp.history||[]).some(h=>h.club===t.name))awardBadge("sold_and_regret");}}
 }
 /* ================= Five-year bomb =================
    Once every 5 seasons, right before the last league matchday, football is briefly
@@ -1591,7 +1646,7 @@ function fiveYearBomb(){
    victim.team=null;victim.retired=true;   // gone for good; not recycled to free agents
    if(t.id===G.userTeam&&G.xi)G.xi=G.xi.filter(id=>id!==victim.id);
    const kid=newPlayer(G.nextPid++,victim.pos,16,t.region);
-   kid.team=t.id;t.squad.push(kid.id);G.players.push(kid);
+   joinClub(kid,t.id);kid.team=t.id;t.squad.push(kid.id);G.players.push(kid);
    dep.push({team:t,victim,reason,kid});
  });
  const mine=dep.find(d=>d.team.id===G.userTeam);
@@ -1774,15 +1829,34 @@ function discontentTick(){
    stale.forEach(p=>{
      t.squad=t.squad.filter(id=>id!==p.id);
      t.unhappy=t.unhappy.filter(id=>id!==p.id);
-     p.team=null;delete p.unhappySince;if(!G.freeAgents.includes(p.id))G.freeAgents.push(p.id);
+     p.team=null;delete p.unhappySince;delete p.promised;if(!G.freeAgents.includes(p.id))G.freeAgents.push(p.id);
      if(t.id===G.userTeam){
        logAdd(`${p.name} forced his exit and left on a free transfer. You got nothing for him.`);
        try{toast(`${p.name} walked out on a free.`);}catch(e){}
      }
    });
+   // broken promises: you told him he would play and he still didn't. He walks now.
+   squadOf(t).slice().forEach(p=>{
+     if(!p||p.promised==null)return;
+     const played=(p.as||0)>=DISCONTENT_YOUNG_APPS;
+     if(played){delete p.promised;if(t.id===G.userTeam)awardBadge("kept_promise");return;}   // promise kept
+     if(p.promised>=G.season)return;                  // still within his season of grace
+     if(t.squad.length<=SQUAD_MIN){delete p.promised;return;}
+     t.squad=t.squad.filter(id=>id!==p.id);
+     t.unhappy=(t.unhappy||[]).filter(id=>id!==p.id);
+     if(G.xi)G.xi=G.xi.filter(id=>id!==p.id);
+     p.team=null;delete p.promised;delete p.unhappySince;
+     if(!G.freeAgents.includes(p.id))G.freeAgents.push(p.id);
+     if(t.id===G.userTeam){
+       awardBadge("broken_promise");
+       logAdd(`${p.name} was promised minutes he never got. He walked out on a free transfer.`);
+       try{toast(`${p.name} walked out \u2014 you broke your promise.`);}catch(e){}
+     }
+   });
    // new agitators: young-and-barely-played, or a benched star
    squadOf(t).forEach(p=>{
      if(!p||isUnhappy(p))return;
+     if(p.promised!=null&&p.promised>=G.season)return;   // inside his promised grace season
      const apps=p.as||0;
      const youngStalling=p.age<DISCONTENT_YOUNG_AGE&&apps<DISCONTENT_YOUNG_APPS;
      const benchedStar=p.ovr>=DISCONTENT_STAR_OVR&&apps<DISCONTENT_STAR_APPS;
@@ -1796,6 +1870,9 @@ function discontentTick(){
      }
    });
  });
+ // a season where nobody on your books asked to leave
+ {const ut=userTeamObj();
+  if(ut&&!(ut.unhappy||[]).length&&G.season>1)awardBadge("no_requests");}
  aiResolveUnhappy();
 }
 /* AI clubs deal with their own unhappy players: sell them cheap to a club with room,
@@ -1815,14 +1892,16 @@ function aiResolveUnhappy(){
        if(tt.unhappy)tt.unhappy=tt.unhappy.filter(id=>id!==p.id);});
      G.freeAgents=G.freeAgents.filter(id=>id!==p.id);
      delete p.unhappySince;
-     if(buyer){buyer.budget-=fee;t.budget+=fee;p.team=buyer.id;buyer.squad.push(p.id);}
-     else{p.team=null;G.freeAgents.push(p.id);}
+     if(buyer){buyer.budget-=fee;t.budget+=fee;joinClub(p,buyer.id);p.team=buyer.id;buyer.squad.push(p.id);}
+     else{joinClub(p,null);p.team=null;G.freeAgents.push(p.id);}
    });
  });
 }
 /* User actions on an unhappy player. */
 function sellUnhappy(p){
  const t=userTeamObj();if(!t||!p||!isUnhappy(p))return;
+ {const bs=G.badgeStats||(G.badgeStats={});bs.windowSales=(bs.windowSales||0)+1;
+  if(bs.windowSales>=3)awardBadge("fire_sale");}
  if(t.squad.length<=SQUAD_MIN)return toast(`Cannot sell below ${SQUAD_MIN} players.`);
  if(p.pos==="GK"&&squadOf(t).filter(x=>x.pos==="GK").length<=2)return toast("Keep at least 2 keepers.");
  const fee=forcedFee(p);
@@ -1833,17 +1912,23 @@ function sellUnhappy(p){
  delete p.unhappySince;
  if(G.xi)G.xi=G.xi.filter(id=>id!==p.id);
  t.budget+=fee;
- if(buyer){buyer.budget-=fee;p.team=buyer.id;buyer.squad.push(p.id);
+ if(buyer){buyer.budget-=fee;joinClub(p,buyer.id);p.team=buyer.id;buyer.squad.push(p.id);
    logAdd(`Sold ${p.name} to ${buyer.name} for a cut-price ${money(fee)} \u2014 he wanted out.`,fee);}
- else{p.team=null;G.freeAgents.push(p.id);
-   logAdd(`${p.name} left for ${money(fee)} \u2014 he wanted out.`,fee);}
+ else{const landed=placeReleasedYouth(p,t.id);
+   if(landed)logAdd(`Sold ${p.name} to ${landed.name} for a cut-price ${money(fee)} \u2014 he wanted out.`,fee);
+   else{p.team=null;if(!G.freeAgents.includes(p.id))G.freeAgents.push(p.id);
+     logAdd(`${p.name} left for ${money(fee)} \u2014 he wanted out.`,fee);}}
  saveGame(true);render();
 }
-/* Promise him a run in the side: he stays, but if he does not play he leaves for free. */
+/* Promise him a run in the side: he drops the demand and gives you one season. If he
+   still doesn't play, he agitates again next season with no patience left. */
 function placateUnhappy(p){
  const t=userTeamObj();if(!t||!p||!isUnhappy(p))return;
- p.unhappySince=G.season;   // reset the clock: he gives you one season to deliver
- logAdd(`You promised ${p.name} more minutes. He stays \u2014 but he will walk for nothing if you don\u2019t deliver.`);
+ t.unhappy=(t.unhappy||[]).filter(id=>id!==p.id);   // he is settled for now
+ delete p.unhappySince;
+ p.promised=G.season;                                // you owe him minutes this season
+ logAdd(`You promised ${p.name} more minutes. He stays \u2014 but if he doesn\u2019t play, he will force his way out.`);
+ try{toast(`${p.name} will stay \u2014 for now. Play him.`);}catch(e){}
  saveGame(true);render();
 }
 /* ================= Player contracts & wage demands (Empire FC 2) =================
@@ -2067,7 +2152,7 @@ function aiSquadTopUp(){
      G.teams.forEach(tt=>{tt.squad=tt.squad.filter(id=>id!==sign.id);
        if(tt.academy)tt.academy=tt.academy.filter(id=>id!==sign.id);
        if(tt.unhappy)tt.unhappy=tt.unhappy.filter(id=>id!==sign.id);});
-     sign.team=t.id;t.squad.push(sign.id);
+     joinClub(sign,t.id);sign.team=t.id;t.squad.push(sign.id);
      G.freeAgents=G.freeAgents.filter(x=>x!==sign.id);
    }
  });
@@ -2223,10 +2308,43 @@ function aiTransfers(){
    t.budget+=sellFee-buy.value;
    detachPlayer(worst);worst.team=null;G.freeAgents.push(worst.id);
    detachPlayer(buy);G.freeAgents=G.freeAgents.filter(id=>id!==buy.id);
-   buy.team=t.id;t.squad.push(buy.id);
+   joinClub(buy,t.id);buy.team=t.id;t.squad.push(buy.id);
    buy.wage=wageOf(buy);buy.contract=newContractYears();
  }
  aiClubTransfers();
+}
+/* ---- career club history ----
+   Every move goes through joinClub(), so a player's CV builds itself: club name, the
+   season he arrived, and the goals/apps he racked up there. Stored as names rather than
+   ids so a club that later renames or a player who outlives records still reads right. */
+function joinClub(p,teamId,season){
+ if(!p)return;
+ p.history=p.history||[];
+ const t=teamId!=null?T(teamId):null;
+ const now=season!=null?season:G.season;
+ const last=p.history[p.history.length-1];
+ if(last&&last.out==null){                       // close out the previous spell
+   last.out=now;
+   last.goals=Math.max(0,(p.gc||0)-(last.gcAt||0));
+   last.apps=Math.max(0,(p.ac||0)-(last.acAt||0));
+   // A stint where he never got on the pitch is transfer-market churn, not a real spell
+   // in his career, so it is dropped rather than cluttering the CV.
+   if(last.apps===0&&last.goals===0)p.history.pop();
+ }
+ if(!t)return;                                   // leaving to free agency just closes the spell
+ // Re-joining the club he most recently left reopens that same spell rather than
+ // stacking duplicate rows, so a back-and-forth reads as one continuous stint.
+ const tail=p.history[p.history.length-1];
+ if(tail&&tail.club===t.name){
+   delete tail.out;delete tail.goals;delete tail.apps;
+   return;
+ }
+ p.history.push({club:t.name,in:now,gcAt:p.gc||0,acAt:p.ac||0});
+}
+/* Goals/apps for the spell a player is currently in. */
+function spellStats(p,h){
+ if(h.out!=null)return{goals:h.goals||0,apps:h.apps||0};
+ return{goals:Math.max(0,(p.gc||0)-(h.gcAt||0)),apps:Math.max(0,(p.ac||0)-(h.acAt||0))};
 }
 function detachPlayer(p){
  G.teams.forEach(tt=>{
@@ -2272,7 +2390,7 @@ function aiClubTransfers(){
    if(!deal||squadFull(buyer))continue;
    buyer.budget-=deal.fee;deal.sel.budget+=deal.fee;
    detachPlayer(deal.p);
-   deal.p.team=buyer.id;buyer.squad.push(deal.p.id);
+   joinClub(deal.p,buyer.id);deal.p.team=buyer.id;buyer.squad.push(deal.p.id);
    deal.p.wage=wageOf(deal.p);deal.p.contract=newContractYears();
    delete deal.p.unhappySince;
    done++;
@@ -2645,11 +2763,11 @@ function stockClub(t){
      G.teams.forEach(tt=>{tt.squad=tt.squad.filter(id=>id!==p.id);
        if(tt.academy)tt.academy=tt.academy.filter(id=>id!==p.id);
        if(tt.unhappy)tt.unhappy=tt.unhappy.filter(id=>id!==p.id);});
-     p.team=t.id;t.squad.push(p.id);
+     joinClub(p,t.id);p.team=t.id;t.squad.push(p.id);
      G.freeAgents=G.freeAgents.filter(x=>x!==p.id);need--;
    }
    while(need>0){
-     const p=newPlayer(G.nextPid++,pos,ri(18,30),t.region);p.team=t.id;t.squad.push(p.id);G.players.push(p);
+     const p=newPlayer(G.nextPid++,pos,ri(18,30),t.region);joinClub(p,t.id);p.team=t.id;t.squad.push(p.id);G.players.push(p);
      need--;
    }
  }
@@ -3057,10 +3175,10 @@ function ageAndRenew(){
    if(homeTeam){
      // a 16-year-old belongs in the academy; only fall back to a senior slot if there is room
      if(!academyFull(homeTeam)){
-       kid.team=homeTeam.id;(homeTeam.academy=homeTeam.academy||[]).push(kid.id);
+       joinClub(kid,homeTeam.id);kid.team=homeTeam.id;(homeTeam.academy=homeTeam.academy||[]).push(kid.id);
        if(old.team===G.userTeam)logAdd(`${old.name} retired. Youth prospect ${kid.name} joins the academy.`);
      }else if(!squadFull(homeTeam)){
-       kid.team=homeTeam.id;homeTeam.squad.push(kid.id);
+       joinClub(kid,homeTeam.id);kid.team=homeTeam.id;homeTeam.squad.push(kid.id);
        if(old.team===G.userTeam)logAdd(`${old.name} retired. Youth prospect ${kid.name} joins the squad.`);
      }else{
        kid.team=null;G.freeAgents.push(kid.id);
@@ -3097,14 +3215,17 @@ function userPromoteYouth(p){
  const t=userTeamObj();if(!t||!p)return;
  if(squadFull(t))return toast(`Senior squad is full (${SQUAD_MAX} max). Sell or release someone first.`);
  if(!promoteFromAcademy(t,p))return toast("Could not promote that player.");
+ awardBadge("first_promotion");
  logAdd(`${p.name} promoted from the academy to the senior squad.`);
  saveGame(true);render();
 }
 function userReleaseYouth(p){
  const t=userTeamObj();if(!t||!p)return;
- if(!confirm(`Release ${p.name} from the academy? He will leave the club for nothing.`))return;
+ if(!confirm(`Release ${p.name} from the academy? He will leave for nothing and sign elsewhere.`))return;
  releaseFromAcademy(t,p);
- logAdd(`${p.name} released from the academy.`);
+ const landed=placeReleasedYouth(p,t.id);
+ logAdd(landed?`${p.name} released from the academy. He signed for ${landed.name}.`
+              :`${p.name} released from the academy.`);
  saveGame(true);render();
 }
 function academyTick(){
@@ -3117,7 +3238,10 @@ function academyTick(){
        if(t.id===G.userTeam)logAdd(`${p.name} has come through the academy and joined the senior squad.`);
      }else{
        releaseFromAcademy(t,p);
-       if(t.id===G.userTeam)logAdd(`${p.name} aged out of the academy and left the club.`);
+       const landed=placeReleasedYouth(p,t.id);
+       if(t.id===G.userTeam)logAdd(landed
+         ? `${p.name} aged out of the academy with no senior slot for him. He signed for ${landed.name}.`
+         : `${p.name} aged out of the academy and left the club as a free agent.`);
      }
    });
    // intake: refill toward a healthy academy with fresh 16-year-olds
@@ -3126,7 +3250,7 @@ function academyTick(){
      if(academyFull(t))break;
      const pos=pick(["GK","DEF","DEF","MID","MID","FWD"]);
      const kid=newPlayer(G.nextPid++,pos,16,t.region);
-     kid.team=t.id;t.academy.push(kid.id);G.players.push(kid);
+     joinClub(kid,t.id);kid.team=t.id;t.academy.push(kid.id);G.players.push(kid);
    }
  });
 }
@@ -3300,6 +3424,8 @@ function buyPlayer(p){
  t.budget-=fee;seller.budget+=fee;
  detachPlayer(p);
  p.team=t.id;t.squad.push(p.id);
+ joinClub(p,t.id);
+ if(fee>=100000000)awardBadge("big_spender");
  p.wage=wageOf(p);p.contract=newContractYears();delete p.demand;delete p.runningDown;
  {const bs=G.badgeStats||(G.badgeStats={});
   bs.windowSigns=(bs.windowSigns||0)+1;if(bs.windowSigns>=5)awardBadge("window_warrior");
@@ -3382,7 +3508,9 @@ function acceptOffer(o){
  if(p.pos==="GK"&&squadOf(t).filter(x=>x.pos==="GK").length<=2)return toast("Keep at least 2 keepers.");
  const buyer=T(o.from);
  t.budget+=o.fee;buyer.budget-=o.fee;
- t.squad=t.squad.filter(x=>x!==p.id);p.team=buyer.id;buyer.squad.push(p.id);
+ {const bs=G.badgeStats||(G.badgeStats={});bs.windowSales=(bs.windowSales||0)+1;
+  if(bs.windowSales>=3)awardBadge("fire_sale");}
+ t.squad=t.squad.filter(x=>x!==p.id);joinClub(p,buyer.id);p.team=buyer.id;buyer.squad.push(p.id);
  if(t.unhappy)t.unhappy=t.unhappy.filter(x=>x!==p.id);delete p.unhappySince;
  if(G.xi)G.xi=G.xi.filter(id=>id!==p.id);
  G.offers=G.offers.filter(x=>x!==o);
@@ -3445,6 +3573,21 @@ function showPlayer(id){
      <div class="stat"><div class="lbl">Apps (career)</div><div style="font-weight:800;font-size:16px">${p.ac||0}</div></div>
    </div>
    <div class="divider"></div>
+   ${(()=>{
+     const h=p.history||[];
+     if(h.length<1)return "";
+     const rows=h.slice().reverse().map(sp=>{
+       const st=spellStats(p,sp);
+       const span=sp.out==null?`${sp.in}\u2013now`:(sp.out>sp.in?`${sp.in}\u2013${sp.out}`:`${sp.in}`);
+       const here=sp.out==null;
+       return `<div class="row small" style="gap:6px;margin-bottom:2px">
+         <span style="flex:1${here?';font-weight:700':''}">${here?'\u25B8 ':''}${sp.club}</span>
+         <span class="muted" style="min-width:62px;text-align:right">S${span}</span>
+         <span style="min-width:58px;text-align:right">${st.apps} app${st.apps===1?'':'s'}</span>
+         <span class="gold" style="min-width:46px;text-align:right">${st.goals} gl${st.goals===1?'':'s'}</span></div>`;
+     }).join("");
+     return `<div class="lbl" style="margin-bottom:4px">Career (${h.length} club${h.length===1?'':'s'})</div>${rows}`;
+   })()}
    <div class="row small">
      <span>Potential: <b>${owned||(p.team===null&&hasScout)||canSeePot(p.team)||(G.superShort||[]).includes(p.id)?p.pot:"?"}</b></span>
      <span>Value: <b class="gold">${money(p.value)}</b></span>
@@ -4032,8 +4175,8 @@ function viewSquad(w){
  {const ut2=userTeamObj(),un=unhappyList(ut2);
   if(un.length){
     const uc=$(`<div class="card" style="border:1px solid var(--loss)"></div>`);
-    uc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px;color:var(--loss)">\u26A0\uFE0F Wants away (${un.length})</h3>`));
-    uc.appendChild($(`<div class="small muted" style="margin-bottom:8px">These players are unhappy with their minutes. Sell them now at a cut price, or promise them a run in the side \u2014 but if they still don\u2019t play, they walk for nothing at the end of next season.</div>`));
+    uc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px;color:var(--loss)">\u26A0\uFE0F Asking to leave (${un.length})</h3>`));
+    uc.appendChild($(`<div class="small muted" style="margin-bottom:8px">These players have handed in transfer requests over their lack of minutes. Sell now at a cut price, or promise them a run in the side \u2014 but if they still don\u2019t play next season, they leave for nothing.</div>`));
     un.forEach(p=>{
       const why=p.age<DISCONTENT_YOUNG_AGE?`only ${p.as||0} apps at ${p.age} \u2014 his development is stalling`
         :`a ${p.ovr} OVR player with ${p.as||0} apps \u2014 he expects to start`;
@@ -4047,6 +4190,18 @@ function viewSquad(w){
       wireNames(box);uc.appendChild(box);
     });
     w.appendChild(uc);
+  }
+  // players you promised a run in the side
+  const owed=squadOf(ut2).filter(p=>p&&p.promised!=null);
+  if(owed.length){
+    const pc=$(`<div class="card"></div>`);
+    pc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\uD83E\uDD1D Promised minutes (${owed.length})</h3>`));
+    pc.appendChild($(`<div class="small muted" style="margin-bottom:6px">You told these players they would play. Give them at least ${DISCONTENT_YOUNG_APPS} appearances this season or they leave for nothing.</div>`));
+    owed.forEach(p=>{
+      const ok=(p.as||0)>=DISCONTENT_YOUNG_APPS;
+      pc.appendChild($(`<div class="small" style="margin-bottom:3px"><span class="pname" data-p="${p.id}">${p.name}</span> \u00B7 <b class="${ok?'res-w':'res-l'}">${p.as||0}</b>/${DISCONTENT_YOUNG_APPS} apps ${ok?"\u2014 promise kept":"\u2014 still owed minutes"}</div>`));
+    });
+    wireNames(pc);w.appendChild(pc);
   }}
 
  // ---- Contract talks ----
@@ -4076,15 +4231,15 @@ function viewSquad(w){
  const sc=$(`<div class="card"></div>`);
  sc.appendChild($(`<h3 style="font-size:15px;margin-bottom:8px">Full squad (${userTeamObj().squad.length})</h3>`));
  const rows=squadOf(userTeamObj()).sort((a,b)=>b.ovr-a.ovr).map(p=>
-   `<tr><td class="l">${isGoat(p.id)?'<span class="goatpill">GOAT</span>':''}<span class="pname${isGoat(p.id)?' goat':''}" data-p="${p.id}">${p.name}</span>${isUnhappy(p)?' <span class="injtag">WANTS AWAY</span>':''}</td><td class="l"><span class="pos ${p.pos}">${p.pos}</span></td>`+
+   `<tr><td class="l">${isGoat(p.id)?'<span class="goatpill">GOAT</span>':''}<span class="pname${isGoat(p.id)?' goat':''}" data-p="${p.id}">${p.name}</span>${isUnhappy(p)?' <span class="injtag">TRANSFER REQUEST</span>':''}</td><td class="l"><span class="pos ${p.pos}">${p.pos}</span></td>`+
    `<td>${ageCell(p)}</td><td class="gold">${p.ovr}</td><td>${p.gs||0}</td>`+
    `<td class="small">${money(p.wage)}</td><td class="small ${(p.contract||0)<=1?'res-l':'muted'}">${p.runningDown!=null?"leaving":(p.contract||0)+"y"}</td>`+
    `<td>${p.inj>0?`<span class="injtag">INJ ${p.inj}</span>`:p.susp>0?`<span class="injtag">SUSP</span>`:"\u2713"}</td>`+
-   `<td><button class="btn sm sec" data-rel="${p.id}">Release</button></td></tr>`).join("");
+   `<td class="act"><button class="btn tiny sec" data-rel="${p.id}">Release</button></td></tr>`).join("");
  const sqt=$(`<table><thead><tr>
    <th class="l">Player</th><th></th><th>Age</th><th>OVR</th><th>Gls</th><th>Wage</th><th>Deal</th><th>Fit</th><th></th></tr></thead><tbody>${rows}</tbody></table>`);
  sqt.querySelectorAll("[data-rel]").forEach(b=>b.onclick=e=>{e.stopPropagation();releasePlayer(P(+b.dataset.rel))});
- wireNames(sqt);sc.appendChild(sqt);
+ wireNames(sqt);{const _w=$(`<div class="tscroll"></div>`);_w.appendChild(sqt);sc.appendChild(_w);}
  sc.appendChild($(`<div class="small muted" style="margin-top:6px">Tap a name for full attributes and career stats. Release frees the wage and squad slot at any time, but returns no fee.</div>`));
  sc.appendChild($(`<div class="small muted" style="margin-top:8px"><span class="ret">R</span> = final season. Players retire at the end of their age-40 year and are replaced in the world by a new 16-year-old.</div>`));
  w.appendChild(sc);
@@ -4103,12 +4258,12 @@ function viewSquad(w){
       return `<tr><td class="l"><span class="pname" data-p="${p.id}">${p.name}</span>${last?' <span class="ret">R</span>':''}</td>`+
        `<td class="l"><span class="pos ${p.pos}">${p.pos}</span></td><td>${p.age}</td>`+
        `<td class="gold">${p.ovr}</td><td>${p.pot}</td>`+
-       `<td><button class="btn sm" data-promo="${p.id}">Promote</button></td>`+
-       `<td><button class="btn sm sec" data-acrel="${p.id}">Release</button></td></tr>`;}).join("");
+       `<td class="act"><button class="btn tiny" data-promo="${p.id}">Promote</button></td>`+
+       `<td class="act"><button class="btn tiny sec" data-acrel="${p.id}">Release</button></td></tr>`;}).join("");
     const at=$(`<table><thead><tr><th class="l">Prospect</th><th></th><th>Age</th><th>OVR</th><th>POT</th><th></th><th></th></tr></thead><tbody>${arows}</tbody></table>`);
     at.querySelectorAll("[data-promo]").forEach(b=>b.onclick=e=>{e.stopPropagation();userPromoteYouth(P(+b.dataset.promo))});
     at.querySelectorAll("[data-acrel]").forEach(b=>b.onclick=e=>{e.stopPropagation();userReleaseYouth(P(+b.dataset.acrel))});
-    wireNames(at);ac.appendChild(at);
+    wireNames(at);{const _w=$(`<div class="tscroll"></div>`);_w.appendChild(at);ac.appendChild(_w);}
     ac.appendChild($(`<div class="small muted" style="margin-top:6px"><span class="ret">R</span> = ages out of the academy at the end of this season.</div>`));
   }
   w.appendChild(ac);}
@@ -4343,6 +4498,7 @@ function signPlayer(p){
  t.budget-=p.value;G.freeAgents=G.freeAgents.filter(x=>x!==p.id);
  p.team=t.id;t.squad.push(p.id);
  p.wage=wageOf(p);p.contract=newContractYears();delete p.demand;delete p.runningDown;
+ joinClub(p,t.id);
  {const bs=G.badgeStats||(G.badgeStats={});
   bs.faSigns=(bs.faSigns||0)+1;if(bs.faSigns>=10)awardBadge("free_agent_king");
   bs.windowSigns=(bs.windowSigns||0)+1;if(bs.windowSigns>=5)awardBadge("window_warrior");
