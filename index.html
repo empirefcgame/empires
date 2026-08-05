@@ -66,6 +66,7 @@
   .tierbadge{font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:700}
   .tier0{color:var(--cel)}.tier1{color:var(--ter)}.tier2{color:var(--tel)}
   .ret{color:#ff8fb3;font-weight:800;font-size:10px;margin-left:3px}
+  .ageout{color:#ff8fb3;font-weight:800;font-size:10px;margin-left:3px}
   .injtag{color:var(--loss);font-size:10px;font-weight:700}
   nav{position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto;
     background:var(--night2);border-top:1px solid var(--line);display:flex;height:66px;z-index:6}
@@ -138,14 +139,13 @@ const SAVE_KEY="empireFC2_v1";
    Youth develop in the academy and must be promoted into a senior slot or moved on when
    they age out at 23, so talent flows through the club instead of being stockpiled. */
 const SQUAD_MAX=20;      // senior squad cap
-const SQUAD_MIN=16;      // cannot sell/release below this
+const SQUAD_MIN=12;      // cannot sell/release below this
 const ACADEMY_MAX=20;    // academy cap
 const ACADEMY_AGE=23;    // must leave the academy at this age
-/* The old game throttled you to 2 approaches a day. In Empire FC 2 the real limiter is
-   the 20-man squad and players refusing to sit on the bench, so the market runs closer
-   to the real thing: a pool of approaches across the whole window, spend them as you
-   like. Every formal approach costs one, landed or rejected. */
-const WINDOW_MOVES=12;
+/* The old game throttled you to 2 approaches a day. In Empire FC 2 there is no cap on
+   approaches at all: the real limiters are the 20-man squad, your budget, and the fact
+   that a club which refuses you once is closed on that player for the season. Trade as
+   hard as you like across the three days. offersMade is kept purely as a window tally. */
 const rnd=(a,b)=>a+Math.random()*(b-a);
 const ri=(a,b)=>Math.floor(rnd(a,b+1));
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -3398,7 +3398,6 @@ function buyPlayer(p){
  const t=userTeamObj();
  if(!inWindow())return toast("Trades only happen in the pre-season window.");
  if(p.team===null)return signPlayer(p);
- if(G.window.offersMade>=WINDOW_MOVES)return toast(`You have used all ${WINDOW_MOVES} approaches for this window.`);
  const fee=transferFee(p);
  if(inTheRed())return toast("Signings are frozen while the club is in the red.");
  if(t.budget<fee)return toast(`Need ${money(fee)} for this transfer.`);
@@ -3416,9 +3415,9 @@ function buyPlayer(p){
  refuseChance=Math.max(0.03,refuseChance-coachTier()*0.03);
  if(Math.random()<refuseChance){
    G.refused[p.id]=true;
-   G.window.offersMade++;   // a formal approach costs a move whether it lands or not
+   G.window.offersMade++;   // tally only
    logAdd(`${seller.name} rejected the approach for ${p.name}.`);
-   toast(`${seller.name} will not sell ${p.name} this season. The approach used one of today's moves.`);
+   toast(`${seller.name} will not sell ${p.name} this season.`);
    saveGame(true);render();return;
  }
  t.budget-=fee;seller.budget+=fee;
@@ -3436,20 +3435,55 @@ function buyPlayer(p){
  logAdd(`Signed ${p.name} from ${seller.name} for ${money(fee)}.`,-fee);
  toast(`Signed ${p.name} for ${money(fee)}.`);squadCapNotice();saveGame(true);render();
 }
+/* Every club in this universe is sitting on a squad worth far more than its cash on
+   hand, so a rival funds a signing the way a real club does: cash, plus what it would
+   raise by moving on the fringe players it no longer needs. This is what makes AI bids
+   possible at all, since rival budgets alone never approach a market fee. */
+function aiTransferPower(t){
+ if(!t||t.id===G.userTeam)return 0;
+ const sq=squadOf(t).filter(Boolean).sort((a,b)=>a.ovr-b.ovr);
+ const spare=Math.max(0,sq.length-SQUAD_MIN);
+ const raise=sq.slice(0,Math.min(3,spare)).reduce((s,p)=>s+Math.round(transferFee(p)*0.85),0);
+ return Math.max(0,t.budget)+raise;
+}
+/* Called after an AI bid lands: the buyer sells fringe players at market to cover the
+   fee and to open a squad slot if it is at the cap. Keeps rival books honest and feeds
+   the free-agent pool, so the world keeps moving instead of quietly breaking the cap. */
+function aiFundAndMakeRoom(t,exceptId){
+ if(!t||t.id===G.userTeam)return;
+ let guard=0;
+ while((t.budget<0||t.squad.length>SQUAD_MAX)&&t.squad.length>SQUAD_MIN&&guard++<8){
+   const keepers=squadOf(t).filter(x=>x&&x.pos==="GK").length;
+   const out=squadOf(t).filter(Boolean)
+     .filter(p=>p.id!==exceptId&&(p.pos!=="GK"||keepers>2))
+     .sort((a,b)=>a.ovr-b.ovr)[0];
+   if(!out)break;
+   t.budget+=Math.round(transferFee(out)*0.85);
+   detachPlayer(out);out.team=null;G.freeAgents.push(out.id);
+ }
+}
 function genOffers(){
- // AI bids for your players, one batch per window day. The market is busy in Empire
- // FC 2, so clubs look past your top few and will bid hard for anyone who wants away.
- G.offers=[];const t=userTeamObj();
- const targets=squadOf(t).filter(Boolean).sort((a,b)=>b.ovr-a.ovr).slice(0,12);
- const n=ri(3,6);
- for(let k=0;k<n;k++){
-   const p=pick(targets);if(!p)break;
-   if(G.offers.find(o=>o.pid===p.id))continue;
-   const buyer=pick(G.teams.filter(x=>x.id!==G.userTeam&&x.tier<=p_tierPref(p)&&!squadFull(x)));
+ // AI bids for your players, a fresh batch every day of the window. Rivals shop the
+ // whole squad, not just the headline names, and they pay market price. A bidder must
+ // be able to fund the deal and must actually be getting an upgrade in that position.
+ G.offers=[];const t=userTeamObj();if(!t)return;
+ const squad=squadOf(t).filter(Boolean);
+ if(!squad.length)return;
+ // Bids keep arriving even when the squad is at the floor: rivals do not know or care
+ // that you cannot sell. The window screen greys those offers out instead of hiding them.
+ const targets=shuffle(squad.slice()).slice(0,10);
+ const want=ri(2,4);                          // 2-3 offers on a typical day, 4 on a busy one
+ for(const p of targets){
+   if(G.offers.length>=want)break;
+   const base=transferFee(p);
+   const premium=isUnhappy(p)?rnd(.55,.75):rnd(.95,1.45);   // agitators fetch less
+   const fee=Math.round(base*premium);
+   const pool=G.teams.filter(x=>x.id!==G.userTeam&&x.tier<=p_tierPref(p)
+     &&aiTransferPower(x)>=fee
+     &&squadOf(x).filter(Boolean).some(q=>q.pos===p.pos&&q.ovr<p.ovr-1));
+   const buyer=pick(pool);
    if(!buyer)continue;
-   const premium=isUnhappy(p)?rnd(.55,.75):rnd(.9,1.5);   // agitators fetch less
-   if(buyer.budget<transferFee(p)*premium)continue;        // bidders must be able to pay
-   G.offers.push({pid:p.id,from:buyer.id,fee:Math.round(transferFee(p)*premium)});
+   G.offers.push({pid:p.id,from:buyer.id,fee});
  }
 }
 function p_tierPref(p){return p.ovr>=80?0:p.ovr>=68?1:2;}
@@ -3511,6 +3545,8 @@ function acceptOffer(o){
  {const bs=G.badgeStats||(G.badgeStats={});bs.windowSales=(bs.windowSales||0)+1;
   if(bs.windowSales>=3)awardBadge("fire_sale");}
  t.squad=t.squad.filter(x=>x!==p.id);joinClub(p,buyer.id);p.team=buyer.id;buyer.squad.push(p.id);
+ p.wage=wageOf(p);p.contract=newContractYears();delete p.demand;delete p.runningDown;
+ aiFundAndMakeRoom(buyer,p.id);   // buyer sells fringe to cover the fee and open a slot
  if(t.unhappy)t.unhappy=t.unhappy.filter(x=>x!==p.id);delete p.unhappySince;
  if(G.xi)G.xi=G.xi.filter(id=>id!==p.id);
  G.offers=G.offers.filter(x=>x!==o);
@@ -4255,7 +4291,7 @@ function viewSquad(w){
   }else{
     const arows=kids.map(p=>{
       const last=p.age>=ACADEMY_AGE-1;
-      return `<tr><td class="l"><span class="pname" data-p="${p.id}">${p.name}</span>${last?' <span class="ret">R</span>':''}</td>`+
+      return `<tr><td class="l"><span class="pname" data-p="${p.id}">${p.name}</span>${last?' <span class="ageout">A</span>':''}</td>`+
        `<td class="l"><span class="pos ${p.pos}">${p.pos}</span></td><td>${p.age}</td>`+
        `<td class="gold">${p.ovr}</td><td>${p.pot}</td>`+
        `<td class="act"><button class="btn tiny" data-promo="${p.id}">Promote</button></td>`+
@@ -4264,7 +4300,7 @@ function viewSquad(w){
     at.querySelectorAll("[data-promo]").forEach(b=>b.onclick=e=>{e.stopPropagation();userPromoteYouth(P(+b.dataset.promo))});
     at.querySelectorAll("[data-acrel]").forEach(b=>b.onclick=e=>{e.stopPropagation();userReleaseYouth(P(+b.dataset.acrel))});
     wireNames(at);{const _w=$(`<div class="tscroll"></div>`);_w.appendChild(at);ac.appendChild(_w);}
-    ac.appendChild($(`<div class="small muted" style="margin-top:6px"><span class="ret">R</span> = ages out of the academy at the end of this season.</div>`));
+    ac.appendChild($(`<div class="small muted" style="margin-top:6px"><span class="ageout">A</span> = ages out of the academy at the end of this season.</div>`));
   }
   w.appendChild(ac);}
 }
@@ -4381,7 +4417,7 @@ function viewTransfers(w){
  // window controls
  if(open){
    const wc=$(`<div class="card" style="border-color:var(--honey)"></div>`);
-   wc.appendChild($(`<div class="small">Pre-season window \u00B7 <b>Day ${G.window.day} of 3</b> \u00B7 ${WINDOW_MOVES-G.window.offersMade} approach${WINDOW_MOVES-G.window.offersMade===1?'':'es'} left this window. Club-to-club trades and sales happen only now. Free agents can be signed anytime.</div>`));
+   wc.appendChild($(`<div class="small">Pre-season window \u00B7 <b>Day ${G.window.day} of 3</b> \u00B7 ${G.window.offersMade} approach${G.window.offersMade===1?'':'es'} made. Trade as much as you like. Club-to-club trades and sales happen only now. Free agents can be signed anytime.</div>`));
    const bd=$(`<button class="btn" style="margin-top:8px">${G.window.day>=3?"Close window and start season":"Advance to Day "+(G.window.day+1)}</button>`);
    bd.onclick=()=>advanceWindowDay();wc.appendChild(bd);
    w.appendChild(wc);
@@ -4390,16 +4426,25 @@ function viewTransfers(w){
    if(G.offers.length){
      const oc=$(`<div class="card"></div>`);
      oc.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Offers for your players</h3>`));
+     // at the squad floor the bids still come in, but nothing can be accepted
+     const thin=userTeamObj().squad.length<=SQUAD_MIN;
      G.offers.forEach((o,idx)=>{
        const p=P(o.pid);if(!p||p.team!==G.userTeam)return;
-       const r=$(`<div class="fixt"><span style="flex:1"><span class="pname" data-p="${p.id}">${p.name}</span>
+       const keepers=squadOf(userTeamObj()).filter(x=>x&&x.pos==="GK").length;
+       const gkBlock=p.pos==="GK"&&keepers<=2;
+       const blocked=thin||gkBlock;
+       const r=$(`<div class="fixt" ${blocked?'style="opacity:.45"':''}><span style="flex:1"><span class="pname" data-p="${p.id}">${p.name}</span>
          <span class="small muted"> ${p.pos} ${p.ovr} \u00B7 from ${T(o.from).name}</span></span>
          <span class="gold" style="font-weight:700;margin-right:8px">${money(o.fee)}</span></div>`);
-       const acc=$(`<button class="btn sm" data-a="${idx}">Accept</button>`);
+       const acc=$(`<button class="btn sm" data-a="${idx}" ${blocked?'disabled':''}>Accept</button>`);
        const rej=$(`<button class="btn sm sec" style="margin-left:4px" data-r="${idx}">Reject</button>`);
-       acc.onclick=()=>acceptOffer(o);rej.onclick=()=>rejectOffer(o);
+       if(!blocked)acc.onclick=()=>acceptOffer(o);
+       rej.onclick=()=>rejectOffer(o);
        r.appendChild(acc);r.appendChild(rej);oc.appendChild(r);
      });
+     if(thin)oc.appendChild($(`<div class="small muted" style="margin-top:6px">Squad too thin to sell \u2014 you are at the ${SQUAD_MIN}-player floor. Sign someone before you can accept a bid.</div>`));
+     else if(G.offers.some(o=>{const p=P(o.pid);return p&&p.pos==="GK";})&&squadOf(userTeamObj()).filter(x=>x&&x.pos==="GK").length<=2)
+       oc.appendChild($(`<div class="small muted" style="margin-top:6px">Keeper bids are locked \u2014 you must keep at least 2 goalkeepers.</div>`));
      wireNames(oc);w.appendChild(oc);
    }
  }else{
@@ -5187,11 +5232,11 @@ function viewWorldTeam(w,id){
  const open=inWindow();
  const rc=$(`<div class="card"></div>`);
  rc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">Squad</h3>
-   <div class="small muted" style="margin-bottom:6px">Fees scale with rating, age and potential. ${open?`Window Day ${G.window.day}, ${WINDOW_MOVES-G.window.offersMade} approaches left this window.`:"Buying opens in the pre-season window."}</div>`));
+   <div class="small muted" style="margin-bottom:6px">Fees scale with rating, age and potential. ${open?`Window Day ${G.window.day} of 3 \u00B7 no limit on approaches.`:"Buying opens in the pre-season window."}</div>`));
  const showPot=sInfo.pot;
  const rows=squadOf(t).sort((a,b)=>b.ovr-a.ovr).map(p=>{
    const fee=transferFee(p);
-   const can=open&&G.window.offersMade<WINDOW_MOVES&&userTeamObj().budget>=fee&&userTeamObj().squad.length<SQUAD_MAX;
+   const can=open&&userTeamObj().budget>=fee&&userTeamObj().squad.length<SQUAD_MAX;
    return `<tr><td class="l"><span class="pname" data-p="${p.id}">${p.name}</span></td>`+
      `<td><span class="pos ${p.pos}">${p.pos}</span></td><td>${ageCell(p)}</td>`+
      `<td class="gold">${p.ovr}</td><td class="muted">${showPot?p.pot:"?"}</td>`+
