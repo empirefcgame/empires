@@ -780,6 +780,17 @@ function exportSave(){
  }
  downloadBlob(blob,fname);
 }
+/* An imported save is untrusted input. Every name in it is interpolated straight into
+   innerHTML when rendered, so a hand-edited file could smuggle markup or an inline event
+   handler into the header, a table or a toast. Nothing the game itself ever writes
+   contains these characters, so stripping them on the way in is lossless. */
+function scrubSaveStrings(o,depth){
+ if(depth>12||o==null)return o;
+ if(typeof o==="string")return o.replace(/[<>"&]/g,"").slice(0,400);
+ if(Array.isArray(o)){for(let i=0;i<o.length;i++)o[i]=scrubSaveStrings(o[i],depth+1);return o;}
+ if(typeof o==="object"){for(const k in o)o[k]=scrubSaveStrings(o[k],depth+1);return o;}
+ return o;
+}
 function importSaveText(text){
  // Validate hard, then run the SAME hydrate path as a disk load. Returns
  // {ok:true} or {ok:false,msg}. Never eval; only JSON.parse. On any failure the
@@ -792,6 +803,7 @@ function importSaveText(text){
  if(!Array.isArray(g.teams)||!g.teams.length||!Array.isArray(g.players)||!g.players.length||g.userTeam==null)
    return{ok:false,msg:"That save is missing core data and looks corrupted."};
  delete g._goat;                       // pure cache, rebuilt on demand
+ scrubSaveStrings(g,0);                // untrusted file: strip anything that could inject markup
  const backup=G;
  try{
    G=g;hydrateLoadedG();
@@ -800,6 +812,7 @@ function importSaveText(text){
    G=backup;if(backup)rebuildIndex();
    return{ok:false,msg:"That save couldn't be loaded \u2014 it may be corrupted."};
  }
+ resetUiState();                       // stale tab/sort/world-view pointers belong to the old career
  saveGame(true);
  return{ok:true};
 }
@@ -3390,7 +3403,7 @@ function transferFee(p){
 function squadCapNotice(){
  // fired right after a signing lands: explains why the market is about to lock
  if(userTeamObj().squad.length>=SQUAD_MAX){
-   logAdd("Squad now has 30 players \u2014 the maximum. Sell or release someone before signing again.");
+   logAdd(`Squad now has ${SQUAD_MAX} players \u2014 the maximum. Sell or release someone before signing again.`);
    toast(`You now have ${SQUAD_MAX} players, the squad limit. Sell or release before signing again.`);
  }
 }
@@ -5128,6 +5141,13 @@ function viewCup(w){
 
 /* ---------- WORLD (team explorer) ---------- */
 let WORLD_TEAM=null;let WORLD_REGION=null;
+/* UI selections live outside G, so after an import or a wipe they can still point at a
+   club or a market filter that belonged to the previous career. Reset them together. */
+function resetUiState(){
+ TAB="club";START_REGION=null;
+ MKT_SORT="ovr";MKT_POS="ALL";MKT_TAB="free";
+ WORLD_TEAM=null;WORLD_REGION=null;
+}
 function viewWorld(w){
  if(WORLD_TEAM!==null&&G.teams.find(t=>t.id===WORLD_TEAM)){viewWorldTeam(w,WORLD_TEAM);return;}
  WORLD_TEAM=null;
