@@ -471,6 +471,27 @@ function wageOf(p){
  const base=Math.max(500,Math.round(valueOf(p)*.0006/100)*100);
  return Math.max(500,Math.round(base*fameWageMult(p)/100)*100);
 }
+/* Highest wage among CONTRACTED players. Free agents are deliberately excluded: their
+   own demand is priced off this number, so counting them would let each famous free
+   agent set a new ceiling that the next one prices off again, and the figure would
+   run away to infinity over a long save. */
+function topContractedWage(){
+ const key=G.season+"-"+G.matchday;
+ if(G._topWage&&G._topWage.key===key)return G._topWage.v;
+ let top=0;
+ for(const q of G.players){if(q.team!=null&&(q.wage||0)>top)top=q.wage;}
+ G._topWage={key,v:top};
+ return top;
+}
+/* A famous player with no club is the best deal and the worst deal in football at the
+   same time. He costs nothing to sign, and he knows it, so he asks to be the best paid
+   man in the world. An Icon asks for more than that. */
+function freeAgentWage(p){
+ const base=wageOf(p);
+ if(!isMarquee(p))return base;
+ const top=topContractedWage();
+ return Math.max(base,Math.round(top*(isIcon(p)?1.15:1.0)/100)*100);
+}
 
 /* ======================= GAME STATE ======================= */
 let G=null;
@@ -759,6 +780,7 @@ function hydrateLoadedG(){
  if(!G.window)G.window={day:4,offersMade:0};
  if(!G.offers)G.offers=[];
  if(G.saga===undefined)G.saga=null;
+ delete G._topWage;                    // pure cache, rebuilt on demand
  if(G.userTeam!==null&&!G.teams.find(t=>t.id===G.userTeam)){
    const reg=userRegionKeySafe();
    const low=G.teams.filter(t=>t.region===reg&&t.tier===2).sort((a,b)=>
@@ -828,7 +850,6 @@ function importSaveText(text){
  if(g.ver!==4)return{ok:false,msg:"That save is from an incompatible version and can't be loaded."};
  if(!Array.isArray(g.teams)||!g.teams.length||!Array.isArray(g.players)||!g.players.length||g.userTeam==null)
    return{ok:false,msg:"That save is missing core data and looks corrupted."};
- delete g._goat;                       // pure cache, rebuilt on demand
  scrubSaveStrings(g,0);                // untrusted file: strip anything that could inject markup
  const backup=G;
  try{
@@ -1208,23 +1229,10 @@ function repOf(t){
 function effCapacity(t){
  // during construction the club uses a temporary ground at ~55% capacity
  return (t.building>0)?Math.round(t.capacity*0.55):t.capacity;}
-function universeGoatId(){
- // the single best attacking player alive (MID or FWD): OVR first, then career
- // goals, apps, id. Memoized per matchday so attendance/preview calls stay cheap.
- const key=G.season+"-"+G.matchday;
- if(G._goat&&G._goat.key===key)return G._goat.id;
- let best=null;
- for(const p of G.players){
-   if(p.pos!=="MID"&&p.pos!=="FWD")continue;
-   if(!best||p.ovr>best.ovr
-     ||(p.ovr===best.ovr&&((p.gc||0)>(best.gc||0)
-       ||((p.gc||0)===(best.gc||0)&&((p.ac||0)>(best.ac||0)
-         ||((p.ac||0)===(best.ac||0)&&p.id<best.id))))))best=p;
- }
- G._goat={key,id:best?best.id:null};
- return G._goat.id;
-}
-function isGoat(id){return id!=null&&id===universeGoatId();}
+/* The old universe GOAT is retired. It named the highest-rated MID or FWD alive, which
+   churned about once a season - "best in the world right now", not greatest of all time.
+   Fame does that job properly, so ICON is the top of the ladder and there is no separate
+   GOAT title, pill or economic bonus. */
 
 /* ======================= STARDOM =======================
    Fame is a STOCK; ability is a FLOW. A player's OVR climbs and falls with the age
@@ -1338,7 +1346,7 @@ function startSaga(p){
  G.saga={pid:p.id,fromClub:p.team,startSeason:G.season,wants,
    suitors:sagaSuitors(p,p.team),leaks:[],userBid:0,resolved:false,winner:null};
  const club=T(p.team);
- (G.news=G.news||[]).unshift({season:G.season,
+ (G.news=G.news||[]).unshift({season:G.season,pid:p.id,
    text:`${p.name} enters the final year of his contract at ${club?club.name:"his club"}. Every club in the world now knows he could be available for nothing.`});
  if(p.team===G.userTeam)
    logAdd(`${p.name} has one year left. Renew him or lose him for nothing.`);
@@ -1354,7 +1362,7 @@ function sagaLeak(){
                    :pick(SAGA_KEYS.filter(k=>!sg.wants.includes(k)))||sg.wants[0];
  const txt=`Sources close to ${p.name} say he ${SAGA_PRIORITIES[key].hint}.`;
  sg.leaks.push({season:G.season,key,truthful,text:txt});
- (G.news=G.news||[]).unshift({season:G.season,text:txt});
+ (G.news=G.news||[]).unshift({season:G.season,pid:p.id,text:txt});
 }
 /* Decision Day. No fee changes hands; the winner takes on the wage. */
 function resolveSaga(){
@@ -1397,7 +1405,7 @@ function resolveSaga(){
  p.wage=best.wage;p.contract=newContractYears();
  delete p.demand;delete p.runningDown;
  const stayed=best.id===sg.fromClub;
- (G.news=G.news||[]).unshift({season:G.season,
+ (G.news=G.news||[]).unshift({season:G.season,pid:p.id,
    text:stayed?`${p.name} signs a new deal and stays at ${won.name}. ${money(best.wage)}/wk.`
               :`${p.name} joins ${won.name} on a free transfer. ${money(best.wage)}/wk.`});
  if(best.id===G.userTeam){logAdd(`${p.name} chose you. ${money(best.wage)}/wk.`);awardBadge("saga_win");}
@@ -1731,7 +1739,7 @@ function badgeCtx(){
  return {t,budget:t.budget,prestige:t.prestige||0,
    rank1:prestigeRank(t.id,globalPrestige())===1,
    leagueRun:_runMax(t.leagueTitleSeasons||[]),regRun:_runMax(regWins),contRun:_runMax(contWins),
-   regWinCount:regWins.length,goatOwned:universeGoatId()!=null&&P(universeGoatId())&&P(universeGoatId()).team===t.id,
+   regWinCount:regWins.length,goatOwned:squadOf(t).some(isIcon),
    gbUser,
    wcApp:mine.some(p=>(p.wcApps||0)>0),wcWin:mine.some(p=>(p.wcWins||0)>0),
    wcWinners:mine.filter(p=>(p.wcWins||0)>0).length,wcSquadMax:0,
@@ -1787,8 +1795,8 @@ const BADGES=[
  {id:"club_record",name:"Club Record",desc:"Break your club\u2019s all-time scoring record"},
  {id:"season_haul",name:"Season Haul",desc:"Have a player score 25+ goals in a season"},
  {id:"hat_trick",name:"Hat-Trick Hero",desc:"Score a hat-trick in a match"},
- {id:"goat_season",name:"GOAT Season",desc:"Have the universe GOAT on your books for a full season",f:(t,x)=>x.goatOwned},
- {id:"goat_whisperer",name:"GOAT Whisperer",desc:"Sign the current universe GOAT",f:(t,x)=>x.goatOwned},
+ {id:"goat_season",name:"Icon Season",desc:"Have an Icon on your books for a full season",f:(t,x)=>x.goatOwned},
+ {id:"goat_whisperer",name:"Icon Whisperer",desc:"Sign an Icon",f:(t,x)=>x.goatOwned},
  {id:"homegrown_hero",name:"Homegrown Hero",desc:"Win the Golden Boot with a player from your own region"},
  {id:"aging_master",name:"Aging Master",desc:"Win the Golden Boot with a player aged 35+"},
  {id:"teen_sensation",name:"Teenage Sensation",desc:"Have an under-20 score 15+ goals in a season"},
@@ -1851,7 +1859,7 @@ const BADGES=[
  {id:"big_spender",name:"Statement Signing",desc:"Pay \u00A3100M or more for a single player"},
  {id:"wage_bill",name:"Golden Handcuffs",desc:"Carry a squad wage bill above \u00A3500k a week"},
  {id:"loyal_one_club",name:"One-Club Man",desc:"Have a player make 200 appearances for you and nobody else"},
- {id:"sold_and_regret",name:"The One That Got Away",desc:"Sell a player who later becomes the universe GOAT"},
+ {id:"sold_and_regret",name:"The One That Got Away",desc:"Sell a player who later becomes an Icon"},
  // prestige & longevity
  {id:"rising_power",name:"Rising Power",desc:"Reach 50 prestige",f:(t)=>(t.prestige||0)>=50},
  {id:"global_elite",name:"Global Elite",desc:"Reach 80 prestige",f:(t)=>(t.prestige||0)>=80},
@@ -1891,10 +1899,9 @@ function checkBadges(){
    awardBadge("homegrown_xi");
  if(squadOf(t).some(p=>p&&(p.ac||0)>=200&&(p.history||[]).length===1&&p.history[0].club===t.name))
    awardBadge("loyal_one_club");
- // a player you sold who went on to become the best in the world
- {const g=universeGoatId();
-  if(g!=null){const gp=P(g);
-    if(gp&&gp.team!==t.id&&(gp.history||[]).some(h=>h.club===t.name))awardBadge("sold_and_regret");}}
+ // a player you sold who went on to become an Icon
+ G.players.forEach(gp=>{
+   if(isIcon(gp)&&gp.team!==t.id&&(gp.history||[]).some(h=>h.club===t.name))awardBadge("sold_and_regret");});
 }
 /* ================= Five-year bomb =================
    Once every 5 seasons, right before the last league matchday, football is briefly
@@ -2221,7 +2228,6 @@ function wageDemand(p){
  const base=wageOf(p);
  let mult=1.15;                                   // nobody re-signs for less
  if(p.ovr>=90)mult+=0.85; else if(p.ovr>=85)mult+=0.55; else if(p.ovr>=80)mult+=0.30;
- if(universeGoatId()===p.id)mult+=0.75;           // the best player alive prices himself
  // recent honours: what he has just helped win
  const s=G.season;
  const titles=t?((t.leagueTitleSeasons||[]).filter(x=>x>=s-3).length):0;
@@ -3086,6 +3092,11 @@ function endSeason(){
  // 6-11 players for a whole season until the next end-of-season pass. Running it last
  // also gives it the bigger free-agent pool that contractTick just created.
  aiSquadTopUp();
+ // Reprice the free-agent pool LAST. ageAndRenew prices clubless players, but
+ // contractTick runs after it and releases a fresh batch, who would otherwise walk into
+ // the market still carrying the wage their old club had agreed years ago. A famous man
+ // out of contract asks for what he is worth today.
+ G.freeAgents.forEach(id=>{const q=P(id);if(q)q.wage=freeAgentWage(q);});
  coachSeasonTick();
  G.teams.forEach(t=>t.st=blankStd());
  rebuildTierTeams();
@@ -3362,7 +3373,7 @@ function awardXP(p,amt){
  let left=scaled;const order=shuffle(attrsFor(p.pos).slice());
  for(const a of order){if(left<=0)break;const add=Math.min(left,1);p[a]=clamp(p[a]+add,18,99);left-=add;}
  setOvr(p);p.value=valueOf(p);
- if(p.team==null||inAcademy(p))p.wage=wageOf(p);   // contracted seniors keep their agreed wage
+ if(p.team==null||inAcademy(p))p.wage=freeAgentWage(p);   // contracted seniors keep their agreed wage
 }
 /* ---- Tippy Cup: four continental teams, contested every 4 seasons, offset two
    seasons from the World Cup so the two alternate. Players are assigned to an
@@ -3511,7 +3522,7 @@ function ageAndRenew(){
    setOvr(p);p.value=valueOf(p);
    // A contracted senior keeps the wage he signed for; his pay only changes when the
    // deal is renegotiated. Unattached players track the open market.
-   if(p.team==null||inAcademy(p))p.wage=wageOf(p);
+   if(p.team==null||inAcademy(p))p.wage=freeAgentWage(p);
    if(p.age>40)retiring.push(p);
  });
  retiring.forEach(old=>{
@@ -3741,9 +3752,10 @@ function transferFee(p){
    if(seller.trait==="youth"&&p.age<24)mult*=1.35;  // protects its prospects
  }
  const fee=Math.max(500000,Math.round(base*mult/100000)*100000);
- // The current universe GOAT is a franchise asset \u2014 he draws crowds and sells shirts,
- // so no club lets him go cheaply. His fee never falls below \u00A3200M.
- if(universeGoatId()===p.id)return Math.max(200000000,fee);
+ // A famous player is a franchise asset: he draws crowds and sells shirts, so no club
+ // lets him go cheaply. Every Marquee and Icon carries a \u00A3200M floor, which in practice
+ // means they change hands on free transfers when a deal expires, not for a fee.
+ if(isMarquee(p))return Math.max(200000000,fee);
  return fee;
 }
 function squadCapNotice(){
@@ -3940,9 +3952,8 @@ function showPlayer(id){
  const bars=attrsFor(p.pos).map(a=>`<div class="arow"><span class="al">${a}</span><span class="abar"><div style="width:${p[a]}%"></div></span><span class="av">${p[a]}</span></div>`).join("");
  const ov=$(`<div class="overlay"></div>`);
  ov.appendChild($(`<div class="pcard">
-   <div class="row"><div><h3 style="font-size:17px">${p.name}${p.age>=40?'<span class="ret">R</span>':''}${isGoat(p.id)?' <span class="goatpill">GOAT</span>':''}</h3>
+   <div class="row"><div><h3 style="font-size:17px">${p.name}${p.age>=40?'<span class="ret">R</span>':''}</h3>
      <div class="small muted">${club} \u00B7 <span class="pos ${p.pos}">${p.pos}</span> \u00B7 ${p.age}y \u00B7 ${p.nat||"?"}</div>
-     ${isGoat(p.id)?'<div class="small gold" style="margin-top:2px;font-weight:700">\u2605 The GOAT \u2014 best player in the world</div>':''}
      ${isMarquee(p)?`<div class="small" style="margin-top:2px">${famePill(p)}<span class="muted">Stardom ${fameOf(p)} \u00B7 ${isIcon(p)?"known across the football world":"a name that sells tickets"}</span></div>`:''}
      ${(()=>{
        const badges=[];
@@ -3987,7 +3998,7 @@ function showPlayer(id){
    <div class="row small">
      <span>Potential: <b>${owned||(p.team===null&&hasScout)||canSeePot(p.team)||(G.superShort||[]).includes(p.id)?p.pot:"?"}</b></span>
      <span>Value: <b class="gold">${money(p.value)}</b></span>
-     <span>Wage: <b>${money(p.wage)}/wk</b></span>
+     <span>Wage: <b>${money(p.team==null?freeAgentWage(p):p.wage)}/wk</b>${p.team==null&&isMarquee(p)?' <span class="gold small">asking</span>':''}</span>
    </div>
    ${p.susp>0?'<div class="small" style="margin-top:8px"><span class="injtag">SUSPENDED</span> Misses the next match.</div>':''}
    ${p.team===G.userTeam?'<button class="btn sec" data-relmodal="'+p.id+'" style="margin-top:12px">Release from contract</button>':''}
@@ -4001,6 +4012,18 @@ function showPlayer(id){
  document.body.appendChild(ov);
 }
 function wireNames(el){el.querySelectorAll("[data-p]").forEach(n=>n.onclick=e=>{e.stopPropagation();showPlayer(+n.dataset.p)});}
+/* News is stored as plain text, so a name in a headline is dead on the page. Where the
+   item carries a pid, wrap that player's name so it can be tapped through to his card -
+   otherwise a saga headline names someone with no way to find out who he plays for or
+   how old he is. */
+function newsHTML(n){
+ if(n.pid==null)return n.text;
+ const q=P(n.pid);
+ if(!q||!n.text.includes(q.name))return n.text;
+ return n.text.replace(q.name,`<span class="pname" data-p="${q.id}">${q.name}</span>`);
+}
+/* A tappable name for use anywhere a player is referenced in prose. */
+function nameLink(q){return q?`<span class="pname" data-p="${q.id}">${q.name}</span>`:"";}
 function stars(n){return `<span class="stars">${"\u2605".repeat(n)}${"\u2606".repeat(5-n)}</span>`;}
 function ageCell(p){return p.age>=40?`${p.age}<span class="ret">R</span>`:p.age;}
 
@@ -4480,7 +4503,8 @@ function viewClub(w){
  if(G.news&&G.news.length){
    const nc=$(`<div class="card"></div>`);
    nc.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Around the world</h3>`));
-   G.news.slice(0,8).forEach(n=>nc.appendChild($(`<div class="logline"><span>${n.text}</span><span class="muted small">S${n.season}</span></div>`)));
+   G.news.slice(0,8).forEach(n=>nc.appendChild($(`<div class="logline"><span>${newsHTML(n)}</span><span class="muted small">S${n.season}</span></div>`)));
+   wireNames(nc);
    w.appendChild(nc);
  }
 }
@@ -4607,11 +4631,11 @@ function viewSquad(w){
     const ut=userTeamObj();
     const qualifies=mine||((ut.prestige||0)>=SAGA_PRESTIGE&&ut.tier===0);
     const sc=$(`<div class="card" style="border:1px solid var(--honey)"></div>`);
-    sc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\u2605 ${sp.name} \u2014 final year</h3>
+    sc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\u2605 ${nameLink(sp)} \u2014 final year</h3>
       <div class="small muted" style="margin-bottom:8px">${famePill(sp)}${from?from.name:"?"} \u00B7 ${sp.pos} ${sp.ovr} \u00B7 ${sp.age}y \u00B7 his deal expires at the end of this season. There is no fee: whoever wins him pays a wage, not a transfer.</div>`));
     if(sg.leaks.length){
       sc.appendChild($(`<div class="small" style="margin-bottom:6px"><b>What the press is saying</b></div>`));
-      sg.leaks.forEach(l=>sc.appendChild($(`<div class="small muted" style="margin-bottom:3px">\u00B7 ${l.text}</div>`)));
+      sg.leaks.forEach(l=>sc.appendChild($(`<div class="small muted" style="margin-bottom:3px">\u00B7 ${l.text.replace(sp.name,nameLink(sp))}</div>`)));
     }else sc.appendChild($(`<div class="small muted" style="margin-bottom:6px">Nothing has leaked yet about what he wants.</div>`));
     const rivals=sg.suitors.filter(id=>id!==G.userTeam).map(id=>T(id)).filter(Boolean);
     if(rivals.length)sc.appendChild($(`<div class="small" style="margin-top:6px"><b>In the running:</b> <span class="muted">${rivals.map(t=>t.name).join(", ")}</span></div>`));
@@ -4662,7 +4686,7 @@ function viewSquad(w){
  const sc=$(`<div class="card"></div>`);
  sc.appendChild($(`<h3 style="font-size:15px;margin-bottom:8px">Full squad (${userTeamObj().squad.length})</h3>`));
  const rows=squadOf(userTeamObj()).sort((a,b)=>b.ovr-a.ovr).map(p=>
-   `<tr><td class="l">${isGoat(p.id)?'<span class="goatpill">GOAT</span>':famePill(p)}<span class="pname${isGoat(p.id)?' goat':''}" data-p="${p.id}">${p.name}</span>${isUnhappy(p)?' <span class="injtag">TRANSFER REQUEST</span>':''}</td><td class="l"><span class="pos ${p.pos}">${p.pos}</span></td>`+
+   `<tr><td class="l">${famePill(p)}<span class="pname${isIcon(p)?' goat':''}" data-p="${p.id}">${p.name}</span>${isUnhappy(p)?' <span class="injtag">TRANSFER REQUEST</span>':''}</td><td class="l"><span class="pos ${p.pos}">${p.pos}</span></td>`+
    `<td>${ageCell(p)}</td><td class="gold">${p.ovr}</td><td>${p.gs||0}</td>`+
    `<td class="small">${money(p.wage)}</td><td class="small ${(p.contract||0)<=1?'res-l':'muted'}">${p.runningDown!=null?"leaving":(p.contract||0)+"y"}</td>`+
    `<td>${p.inj>0?`<span class="injtag">INJ ${p.inj}</span>`:p.susp>0?`<span class="injtag">SUSP</span>`:"\u2713"}</td>`+
@@ -4857,7 +4881,7 @@ function viewTransfers(w){
      const refusedTag=G.refused&&G.refused[p.id];
      const fee=transferFee(p);
      const canAfford=_bud>=fee;
-     return `<tr><td class="l">${isGoat(p.id)?'<span class="goatpill">GOAT</span>':famePill(p)}<span class="pname${isGoat(p.id)?' goat':''}" data-p="${p.id}">${p.name}</span></td>`+
+     return `<tr><td class="l">${famePill(p)}<span class="pname${isIcon(p)?' goat':''}" data-p="${p.id}">${p.name}</span></td>`+
        `<td><span class="pos ${p.pos}">${p.pos}</span></td><td>${p.age}</td>`+
        `<td class="gold">${p.ovr}</td><td class="muted">${p.pot}</td>`+
        `<td class="l small muted">${club?club.name:"?"}</td>`+
@@ -4914,7 +4938,7 @@ function viewTransfers(w){
      :(t.budget>=fee&&t.squad.length<SQUAD_MAX);
    const btnLabel=isScouted?(refused?'Refused':open?'Offer':'Closed'):'Sign';
    const potCell=hasScout||isScouted?p.pot:"?";
-   return `<tr><td class="l">${isGoat(p.id)?'<span class="goatpill">GOAT</span>':famePill(p)}<span class="pname${isGoat(p.id)?' goat':''}" data-p="${p.id}">${p.name}</span></td><td><span class="pos ${p.pos}">${p.pos}</span></td>`+
+   return `<tr><td class="l">${famePill(p)}<span class="pname${isIcon(p)?' goat':''}" data-p="${p.id}">${p.name}</span></td><td><span class="pos ${p.pos}">${p.pos}</span></td>`+
    `<td>${ageCell(p)}</td><td class="gold">${p.ovr}</td><td class="muted">${potCell}</td>`+
    `<td>${money(fee)}</td>`+
    `<td>${refused?'<span class="small muted">Refused</span>'
@@ -4935,10 +4959,17 @@ function signPlayer(p){
  if(inTheRed())return toast("Signings are frozen while the club is in the red.");
  if(t.budget<p.value)return toast("Not enough in the budget.");
  if(t.squad.length>=SQUAD_MAX)return toast(`Squad is full (${SQUAD_MAX} max). Sell or release a player to make room.`);
+ const askedWage=freeAgentWage(p);
+ // A famous free agent's wage is the whole cost of the deal, so make the board test it
+ // rather than only the (tiny) signing fee. This is the trade: no transfer fee at all,
+ // but he walks in as the best paid player at the club by a distance.
+ if(isMarquee(p)&&askedWage*SEASON_LEN>Math.max(t.budget,0)*2.5)
+   return toast(`${p.name} wants ${money(askedWage)}/wk. Your board will not sanction it.`);
  t.budget-=p.value;G.freeAgents=G.freeAgents.filter(x=>x!==p.id);
  p.team=t.id;t.squad.push(p.id);
- p.wage=wageOf(p);p.contract=newContractYears();delete p.demand;delete p.runningDown;
+ p.wage=askedWage;p.contract=newContractYears();delete p.demand;delete p.runningDown;
  joinClub(p,t.id);
+ if(isMarquee(p))logAdd(`${p.name} signs on a free \u2014 ${money(askedWage)}/wk makes him your highest earner.`);
  {const bs=G.badgeStats||(G.badgeStats={});
   bs.faSigns=(bs.faSigns||0)+1;if(bs.faSigns>=10)awardBadge("free_agent_king");
   bs.windowSigns=(bs.windowSigns||0)+1;if(bs.windowSigns>=5)awardBadge("window_warrior");
@@ -5475,7 +5506,7 @@ function viewCup(w){
          const games=tc.gamesPlayed&&tc.gamesPlayed[p.id]||0;
          const club=p.team!=null&&T(p.team)?T(p.team).name:'Free agent';
          return `<tr><td class="l muted">${i+1}</td>`+
-           `<td class="l">${isGoat(p.id)?'<span class="goatpill">GOAT</span>':famePill(p)}<span class="pname${isGoat(p.id)?' goat':''}" data-p="${p.id}">${p.name}</span></td>`+
+           `<td class="l">${famePill(p)}<span class="pname${isIcon(p)?' goat':''}" data-p="${p.id}">${p.name}</span></td>`+
            `<td><span class="pos ${p.pos}">${p.pos}</span></td>`+
            `<td class="gold">${p.ovr}</td>`+
            `<td class="l small muted">${club}</td>`+
@@ -5639,7 +5670,7 @@ function viewWorldTeam(w,id){
  const rows=squadOf(t).sort((a,b)=>b.ovr-a.ovr).map(p=>{
    const fee=transferFee(p);
    const can=open&&userTeamObj().budget>=fee&&userTeamObj().squad.length<SQUAD_MAX;
-   return `<tr><td class="l">${isGoat(p.id)?'<span class="goatpill">GOAT</span>':famePill(p)}<span class="pname" data-p="${p.id}">${p.name}</span></td>`+
+   return `<tr><td class="l">${famePill(p)}<span class="pname${isIcon(p)?' goat':''}" data-p="${p.id}">${p.name}</span></td>`+
      `<td><span class="pos ${p.pos}">${p.pos}</span></td><td>${ageCell(p)}</td>`+
      `<td class="gold">${p.ovr}</td><td class="muted">${showPot?p.pot:"?"}</td>`+
      `<td>${money(fee)}</td>`+
