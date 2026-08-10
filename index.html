@@ -744,7 +744,11 @@ function genWorld(ownerName){
    const tmpl={GK:2,DEF:7,MID:7,FWD:4};
    for(const pos in tmpl){
      const cnt=tmpl[pos];
-     const list=regPlayers.filter(p=>p.pos===pos).sort((a,b)=>b.ovr-a.ovr);
+     // Sorted on MARKET RATING, not raw OVR. Sorting on OVR alone meant a sixteen-year-old
+     // with a ninety-eight ceiling ranked below a finished thirty-year-old journeyman and
+     // dropped straight out of the draft into free agency - which is why the free agent
+     // screen opened on a rack of future world-beaters at squad-player prices.
+     const list=regPlayers.filter(p=>p.pos===pos).sort((a,b)=>marketRating(b)-marketRating(a));
      const per=PER_TIER*cnt;
      for(let tier=0;tier<3;tier++){
        const block=list.slice(tier*per,tier*per+per);
@@ -1519,15 +1523,18 @@ function fameFloor(p){
 const FAME_FORM_CEIL=62;      // what pure, current, world-best form can carry you to
 function fameCareerCeil(p){
  if(!p)return 100;
+ /* The bar for each line is deliberately high. One Golden Boot and a hundred goals is a
+    very good career, and a very good career is a MARQUEE - Haaland, Bellingham, Yamal.
+    Icon is the tier above all of them, and it should take a decorated decade. */
  let c=FAME_FORM_CEIL;
- c+=Math.min(30,(p.gbWins||0)*5);            // Golden Boots: the single loudest line
- c+=Math.min(14,(p.gc||0)*0.055);            // a career's worth of goals
- c+=Math.min(8,(p.ac||0)*0.022);             // longevity: he was there for years
- c+=Math.min(12,(p.eliteYears||0)*2);        // seasons among the ten best alive
- c+=Math.min(8,(p.topYears||0)*2.5);         // seasons among the best three alive
- c+=Math.min(12,(p.contWins||0)*3);          // continental crowns
- c+=Math.min(9,(p.leagueWins||0)*1.5);       // league titles he actually played for
- c+=(p.wcWins||0)*5+(p.tippyWins||0)*3;
+ c+=Math.min(20,(p.gbWins||0)*4);            // Golden Boots: the single loudest line
+ c+=Math.min(10,(p.gc||0)*0.03);             // a career's worth of goals
+ c+=Math.min(4,(p.ac||0)*0.012);             // longevity: he was there for years
+ c+=Math.min(8,(p.eliteYears||0)*1.2);       // seasons among the ten best alive
+ c+=Math.min(10,(p.topYears||0)*2.5);        // seasons among the best three alive
+ c+=Math.min(10,(p.contWins||0)*2.5);        // continental crowns
+ c+=Math.min(5,(p.leagueWins||0)*0.8);       // league titles he actually played for
+ c+=(p.wcWins||0)*4+(p.tippyWins||0)*2.5;
  /* And a hard gate under all of it. Without one, the cheapest route to Icon needed no
     honours whatsoever: a prodigy who was simply the highest-rated player alive from
     nineteen banked six elite seasons and crossed the line at twenty-two with an empty
@@ -1535,9 +1542,10 @@ function fameCareerCeil(p){
     debut at sixteen and play every game, so his season count saturates while he is
     still a kid. Age is the honest measure. Icon is a verdict on a career and careers
     take years of a life, not just a run of good form: the line is unreachable before
-    the late twenties no matter how early he arrived, and the ceiling keeps climbing
-    through his thirties as the body of work grows. */
- c=Math.min(c,FAME_FORM_CEIL+Math.max(0,(p.age||0)-20)*2.6);
+    thirty no matter how early he arrived, and the ceiling keeps climbing from there as
+    the body of work grows. A twenty-eight year old at the peak of his powers tops out
+    around seventy-six: the best player in the world, and still not an Icon yet. */
+ c=Math.min(c,FAME_FORM_CEIL+Math.max(0,(p.age||0)-22)*2.4);
  return clamp(c,0,100);
 }
 /* A short, readable account of why he is (or is not) an Icon yet. */
@@ -2803,11 +2811,14 @@ function aiSquadTopUp(){
      if(t.trait==="youth")sign=cands.sort((a,b)=>(b.pot-b.age*2)-(a.pot-a.age*2))[0];
      else if(t.trait==="selling")sign=cands.sort((a,b)=>a.value-b.value)[0];
      else{
-       const afford=cands.filter(p=>p.value<=Math.max(t.budget,0)+400000).sort((a,b)=>b.ovr-a.ovr);
+       // Rivals judge a free agent the way the market does, so a released prodigy is
+       // gone within a window instead of sitting on the list waiting for you.
+       const afford=cands.filter(p=>freeAgentFee(p)<=Math.max(t.budget,0)+400000)
+         .sort((a,b)=>marketRating(b)-marketRating(a));
        sign=afford[0]||cands.sort((a,b)=>a.value-b.value)[0];
      }
      if(!sign)break;
-     t.budget-=Math.round(sign.value*.5);          // free agents come cheap
+     t.budget-=Math.round(freeAgentFee(sign)*.6);  // AI gets a keener deal than you do
      G.teams.forEach(tt=>{tt.squad=tt.squad.filter(id=>id!==sign.id);
        if(tt.academy)tt.academy=tt.academy.filter(id=>id!==sign.id);
        if(tt.unhappy)tt.unhappy=tt.unhappy.filter(id=>id!==sign.id);});
@@ -3022,6 +3033,7 @@ function joinClub(p,teamId,season){
    delete tail.out;delete tail.goals;delete tail.apps;
    return;
  }
+ p.joined=now;
  p.history.push({club:t.name,in:now,gcAt:p.gc||0,acAt:p.ac||0});
 }
 /* Goals/apps for the spell a player is currently in. */
@@ -3956,34 +3968,54 @@ function userReleaseYouth(p){
 const RND_PROJECTS={
  pricing:{name:"Dynamic Pricing Engine",cost:35e6,years:1,chance:0.30,
   desc:"Price every seat against live demand instead of setting one number for the season.",
-  effect:"Gate receipts +15% at every home fixture, permanently."},
+  effect:"Gate receipts +15% at every home fixture, permanently.",
+  cost_note:"Worth the most to a big ground with a big following. If you are in a 5,000-seat stadium in the third tier, 15% of a small gate is a small number, and the \u00A335M would do more as a player.",
+  pays:"gate"},
  medical:{name:"Biometric Load Management",cost:40e6,years:1,chance:0.28,
   desc:"Wearables on every player and a workload model that flags a breakdown before it happens.",
-  effect:"Injury spells 34% shorter, plus a 35% chance each matchday of recovering an extra day."},
+  effect:"Injury spells 34% shorter, plus a 35% chance each matchday of recovering an extra day.",
+  cost_note:"Overlaps with a five-star Physio, who you can hire this afternoon for a weekly wage instead of \u00A340M and a coin flip. Best value for a thin squad that cannot absorb losing anyone.",
+  pays:"squad"},
  setpiece:{name:"Set Piece Laboratory",cost:45e6,years:1,chance:0.24,
   desc:"A dedicated analysis unit and a training pitch that does nothing else all week.",
-  effect:"+0.9 to your side's match boost in every fixture, home and away, forever."},
+  effect:"+0.9 to your side's match boost in every fixture, home and away, forever.",
+  cost_note:"Roughly what a full coaching tier is worth, on every match you ever play. The catch is that \u00A345M also buys a very good player outright, and he shows up on the pitch whether or not a die rolls your way.",
+  pays:"results"},
  contracts:{name:"Contract Valuation Model",cost:50e6,years:2,chance:0.24,
   desc:"Prices a player's next deal more accurately than his agent can.",
-  effect:"Every wage demand from your own players is 15% lower."},
+  effect:"Every wage demand from your own players is 15% lower.",
+  cost_note:"Compounds with inflation, so it is worth more in season 20 than season 5 \u2014 but only if you are carrying a big wage bill. A club paying \u00A3300k/wk saves \u00A345k a week; a club paying \u00A360k/wk saves almost nothing.",
+  pays:"wages"},
  merch:{name:"Global Merchandise Platform",cost:55e6,years:2,chance:0.22,
   desc:"Direct-to-fan distribution in every market your club plays in.",
-  effect:"Merchandise income +30% every matchday, permanently."},
+  effect:"Merchandise income +30% every matchday, permanently.",
+  cost_note:"Merchandise scales off your squad's star power, so this pays a club full of Marquees and almost nothing to a squad of honest professionals. Two seasons before you find out either way.",
+  pays:"merch"},
  scouting:{name:"Predictive Scouting Model",cost:60e6,years:1,chance:0.20,
   desc:"A model that reads a player's ceiling out of match data rather than a scout's eye.",
-  effect:"See the true potential of every player at every club in the world, forever, without ever paying a reveal fee again."},
+  effect:"See the true potential of every player at every club in the world, forever, without ever paying a reveal fee again.",
+  cost_note:"Replaces the Gold Scout entirely, wage and reveal fees both, and those costs rise with inflation every season while this does not. The most useful project in the game if you trade a lot, and dead weight if you never look at another club's squad.",
+  pays:"scouting"},
  sponsor:{name:"Fan Data Exchange",cost:65e6,years:2,chance:0.20,
   desc:"Turns a supporter base into an audience that sponsors bid against each other for.",
-  effect:"Sponsorship income +25% every matchday, permanently."},
+  effect:"Sponsorship income +25% every matchday, permanently.",
+  cost_note:"Sponsorship scales with your reputation and your tier, so this rewards a club that is already big and punishes one that is hoping to become big. Separate from your shoe deal, which it does not touch.",
+  pays:"sponsor"},
  dna:{name:"Genomic Talent Screening",cost:70e6,years:2,chance:0.18,
   desc:"Screen every intake for ceiling rather than for what a sixteen-year-old can already do.",
-  effect:"Every academy intake arrives with +6 to +13 potential, every season, forever."},
+  effect:"Every academy intake arrives with +6 to +13 potential, every season, forever.",
+  cost_note:"The slowest payoff on the board by a distance. A sixteen-year-old who arrives next summer is a first-team player around season six and a sellable asset after that. Only worth it if you intend to still be here.",
+  pays:"academy"},
  negotiation:{name:"Transfer Market Analytics",cost:80e6,years:2,chance:0.15,
   desc:"Models a selling club's real reserve price instead of believing its asking price.",
-  effect:"Every transfer fee you pay is 12% lower."},
+  effect:"Every transfer fee you pay is 12% lower.",
+  cost_note:"Pays for itself only if you keep buying: at 12% off, you need roughly \u00A3670M of signings to recover the \u00A380M. Useless to a club that builds from its academy, excellent for one that shops every window.",
+  pays:"transfers"},
  neuro:{name:"Neuro-Cognitive Training Suite",cost:90e6,years:2,chance:0.12,
   desc:"Decision-making drills in simulation, run against the situations your side actually faces.",
-  effect:"Every under-23 at your club gains up to +2 extra attribute points a season, on top of everything else."}
+  effect:"Every under-23 at your club gains up to +2 extra attribute points a season, on top of everything else.",
+  cost_note:"The dearest project and the longest odds on the board: seven or eight attempts to land it on average, which is over \u00A3700M of expected spending. It stacks on top of a Gold training facility and a Youth-developer coach, and a club running all three turns prospects into finished players years early.",
+  pays:"academy"}
 };
 /* Odds are deliberately long and they get longer as the prize gets bigger: the cheapest
    project on the board is under a third, and the one that would change your academy
@@ -4016,6 +4048,64 @@ function rndDrawOffers(){
  const r=rndState();
  const pool=Object.keys(RND_PROJECTS).filter(k=>!r.done[k]&&!rndActive(k));
  r.offers=shuffle(pool.slice()).slice(0,RND_OFFER_COUNT);
+}
+/* A president should be able to read the whole case for a project - what it does, what
+   it is worth to HIS club specifically, what it competes with for the same money, and
+   what happens when it fails - without having to tap a button labelled Commission to
+   find out. Everything lives here, and the card itself stays short enough to scan. */
+function rndDetails(key){
+ const p=RND_PROJECTS[key];if(!p)return;
+ const t=userTeamObj();if(!t)return;
+ const r=rndState();
+ const cost=rndCost(key),fails=r.failed[key]||0,odds=Math.round(p.chance*100);
+ const expected=Math.round(cost/p.chance);
+ const done=!!r.done[key],running=rndActive(key);
+ const canPay=t.budget>=cost;
+ const ov=$(`<div class="overlay"></div>`);
+ const box=$(`<div class="pcard"></div>`);
+ box.appendChild($(`<div class="row"><h3 style="font-size:17px">${p.name}</h3>
+   <span class="small ${odds>=25?"gold":"injtag"}">${odds}% chance</span></div>
+  <div class="small muted" style="margin-top:2px">${p.desc}</div>`));
+
+ box.appendChild($(`<div class="divider"></div>`));
+ box.appendChild($(`<div class="small" style="margin-bottom:3px"><b class="gold">If it works</b></div>
+   <div class="small" style="margin-bottom:8px">${p.effect}</div>
+   <div class="small" style="margin-bottom:3px"><b style="color:var(--loss)">If it fails</b></div>
+   <div class="small" style="margin-bottom:8px">The ${money(cost)} is gone. You get nothing back, no partial result, no consolation. The project returns to the board and the next attempt costs 12% more.</div>`));
+
+ box.appendChild($(`<div class="divider"></div>`));
+ box.appendChild($(`<div class="small" style="margin-bottom:3px"><b>Is it worth it to you?</b></div>
+   <div class="small muted" style="margin-bottom:8px">${p.cost_note||""}</div>`));
+
+ box.appendChild($(`<div class="divider"></div>`));
+ const line=(l,v,cls)=>`<div class="logline"><span class="muted">${l}</span><span class="${cls||""}">${v}</span></div>`;
+ box.appendChild($(
+   line("Price now",money(cost),canPay?"gold":"")+
+   line("Your budget",money(t.budget),canPay?"":"injtag")+
+   line("Result arrives in",`${p.years} season${p.years===1?"":"s"}`)+
+   line("Chance of success",`${odds}%`)+
+   line("Attempts expected",`${Math.round(1/p.chance*10)/10}`)+
+   line("Expected total spend",money(expected),"gold")+
+   (fails?line("Failed here before",`${fails}\u00D7 \u00B7 price up ${Math.round((Math.pow(1.12,Math.min(6,fails))-1)*100)}%`,"injtag"):"")
+ ));
+ box.appendChild($(`<div class="small muted" style="margin-top:8px">Expected total spend is what this project costs on average before it lands, counting the attempts that fail. It is the number to compare against a player, a stand, or a coach \u2014 not the price on the button.</div>`));
+
+ if(done)box.appendChild($(`<div class="small gold" style="margin-top:10px">Already operating. Nothing more to pay.</div>`));
+ else if(running)box.appendChild($(`<div class="small" style="margin-top:10px">Already in development. You will know when the season turns.</div>`));
+ else if(!inWindow())box.appendChild($(`<div class="small muted" style="margin-top:10px">Projects are commissioned in the pre-season window only.</div>`));
+ else{
+   const b=$(`<button class="btn ${canPay?"":"sec"}" style="margin-top:12px">Commission \u00B7 ${money(cost)}</button>`);
+   b.disabled=!canPay;
+   b.onclick=()=>{ov.remove();rndFund(key)};
+   box.appendChild(b);
+   if(!canPay)box.appendChild($(`<div class="small injtag" style="margin-top:6px">Short by ${money(cost-t.budget)}.</div>`));
+ }
+ const cl=$(`<button class="btn sec" style="margin-top:8px">Close</button>`);
+ cl.onclick=()=>ov.remove();
+ box.appendChild(cl);
+ ov.appendChild(box);
+ ov.onclick=e=>{if(e.target===ov)ov.remove()};
+ document.body.appendChild(ov);
 }
 function rndFund(key){
  const t=userTeamObj();if(!t)return;
@@ -4214,28 +4304,63 @@ function buyScout(teamId){
  logAdd(`Scouted ${T(teamId).name} for the season.`,-cost);
  saveGame(true);render();
 }
+/* ======================= THE TRANSFER MARKET =======================
+   The old model was linear - OVR times a million - with a flat \u00A3200M FLOOR under
+   anyone carrying a Marquee badge. That floor was the whole problem. It meant an
+   eighty-five rated forward with one Golden Boot and a twenty-two year old with a
+   promising couple of seasons both priced identically to the best player on earth,
+   because the badge was binary and the floor did not care what was behind it. Buy a
+   cheap prospect, wait for the badge, sell for three hundred million. That is not a
+   transfer market, it is a printing press.
+
+   So: no floor, and a curve instead of a line. Each point of OVR is worth about 12.7%
+   more than the last, which means the money bunches at the very top exactly as it does
+   in reality - a squad player is cheap, a very good player is expensive, and the best
+   player alive is in a bracket of his own. Fame is a multiplier on top rather than an
+   override, worth up to a third extra, because a famous player genuinely does sell
+   shirts. And there is a hard ceiling on the whole thing: the record fee, which rises
+   with inflation and nothing else. Nobody is ever worth more than the record. */
+const XFER_ANCHOR=20000000;    // what a 75-rated player costs
+const XFER_K=0.12;             // each OVR point above him is ~12.7% dearer
+const XFER_RECORD=225000000;   // the world record fee, in season-1 money
+function marketRating(p){
+ // What the market is actually buying: what he is now, plus a hard-headed discount on
+ // what he might become. Used for pricing AND for deciding who ends up where, so a
+ // sixteen-year-old with a ninety-eight ceiling is never mistaken for a spare part.
+ if(!p)return 0;
+ const gap=Math.max(0,effPot(p)-p.ovr);
+ const yrs=Math.max(0,24-p.age)/8;                 // credit only for time to realise it
+ return p.ovr+gap*clamp(yrs,0,1)*0.55;
+}
 function transferFee(p){
- // Headline is OVR x £1M, but the fee shifts with age and potential so a
- // young, high-ceiling player costs well above an aging one at the same OVR.
- const base=p.ovr*XFER_PER_OVR*inflIndex();
- let mult=1;
- if(p.age<=21)mult=1.30; else if(p.age<=25)mult=1.12; else if(p.age<=29)mult=1.0;
- else if(p.age<=32)mult=0.78; else if(p.age<=35)mult=0.55; else mult=0.38;
- if(p.pot-p.ovr>=10&&p.age<24)mult*=1.15;      // wonderkid premium
+ if(!p)return 0;
+ let fee=XFER_ANCHOR*Math.exp(XFER_K*(p.ovr-75))*inflIndex();
+ // Age: the same rating is worth far more with a decade ahead of it than behind it.
+ if(p.age<=21)fee*=1.30; else if(p.age<=25)fee*=1.12; else if(p.age<=29)fee*=1.0;
+ else if(p.age<=32)fee*=0.78; else if(p.age<=35)fee*=0.55; else fee*=0.38;
+ // Ceiling, priced properly rather than as a flat 15% nod. A big gap on a young player
+ // is most of what you are paying for, and it is why prospects are not cheap any more.
+ const gap=Math.max(0,effPot(p)-p.ovr);
+ if(p.age<24&&gap>0)fee*=1+Math.min(0.95,gap*0.045);
  // the selling club's identity moves the asking price
  const seller=p.team!=null?T(p.team):null;
  if(seller&&seller.id!==G.userTeam){
-   if(seller.trait==="selling")mult*=0.75;      // motivated seller
-   if(seller.trait==="hoarder")mult*=1.65;      // will not be moved cheaply
-   if(seller.trait==="youth"&&p.age<24)mult*=1.35;  // protects its prospects
+   if(seller.trait==="selling")fee*=0.75;          // motivated seller
+   if(seller.trait==="hoarder")fee*=1.65;          // will not be moved cheaply
+   if(seller.trait==="youth"&&p.age<24)fee*=1.35;  // protects its prospects
  }
- const fee=Math.max(IN(500000),Math.round(base*mult/100000)*100000);
- // A famous player is a franchise asset: he draws crowds and sells shirts, so no club
- // lets him go cheaply. Every Marquee and Icon carries a \u00A3200M floor, which in practice
- // means they change hands on free transfers when a deal expires, not for a fee.
- if(isMarquee(p))return Math.max(IN(200000000),fee);
- return fee;
+ // Fame is a premium, not an override: a household name sells shirts and shifts tickets.
+ fee*=1+clamp((fameOf(p)-50)/50,0,1)*0.33;
+ fee=Math.min(fee,IN(XFER_RECORD));                // nobody beats the record
+ return Math.max(IN(400000),Math.round(fee/100000)*100000);
 }
+/* A free agent costs no transfer fee, only the cost of persuading him to come: an
+   agent's cut and a signing bonus. It is a modest discount on the same market price
+   rather than a separate, much cheaper price list - which is what turned the free
+   agent screen into a shop full of underpriced prodigies you could flip for ten times
+   the money. The real cost of a free agent was always meant to be his WAGE, not his
+   fee, and freeAgentWage already makes a famous one the best paid man at the club. */
+function freeAgentFee(p){return Math.max(IN(200000),Math.round(transferFee(p)*0.75/100000)*100000);}
 function squadCapNotice(){
  // fired right after a signing lands: explains why the market is about to lock
  if(userTeamObj().squad.length>=SQUAD_MAX){
@@ -4320,7 +4445,12 @@ function genOffers(){
  if(!squad.length)return;
  // Bids keep arriving even when the squad is at the floor: rivals do not know or care
  // that you cannot sell. The window screen greys those offers out instead of hiding them.
- const targets=shuffle(squad.slice()).slice(0,10);
+ /* Nobody bids for a man who signed five minutes ago. Without this, the loop was:
+    sign an underpriced free agent, collect a nine-figure bid the same window, repeat
+    until rich. A player has to have actually played for you before rivals want him. */
+ const settled=squad.filter(p=>p.joined==null||G.season-p.joined>=1);
+ const targets=shuffle(settled.slice()).slice(0,10);
+ if(!targets.length)return;
  const want=ri(2,4);                          // 2-3 offers on a typical day, 4 on a busy one
  for(const p of targets){
    if(G.offers.length>=want)break;
@@ -4439,11 +4569,9 @@ function showPlayer(id){
  ov.appendChild($(`<div class="pcard">
    <div class="row"><div><h3 style="font-size:17px">${p.name}${p.age>=40?'<span class="ret">R</span>':''}</h3>
      <div class="small muted">${club} \u00B7 <span class="pos ${p.pos}">${p.pos}</span> \u00B7 ${p.age}y \u00B7 ${p.nat||"?"}</div>
-     ${isMarquee(p)?`<div class="small" style="margin-top:2px">${famePill(p)}<span class="muted">Stardom ${fameOf(p)} \u00B7 ${isIcon(p)?"known across the football world":"a name that sells tickets"}</span></div>`:''}
-     ${isMarquee(p)?(()=>{const res=fameResume(p),ceil=fameCareerCeil(p);
-       return `<div class="small muted" style="margin-top:2px">${res.length?`Career: ${res.join(" \u00B7 ")}. `:""}${isIcon(p)
-         ? `His record carries him to Icon.`
-         : `His record supports a stardom of ${ceil}. Icon starts at ${FAME_ICON}, and it is earned over a career, not a season.`}</div>`;})():''}
+     ${isMarquee(p)?`<div class="small" style="margin-top:2px">${famePill(p)}<span class="muted">Stardom ${fameOf(p)}/${Math.round(fameCareerCeil(p))}</span></div>`:''}
+     ${isMarquee(p)?(()=>{const res=fameResume(p);
+       return res.length?`<div class="small muted" style="margin-top:2px">${res.join(" \u00B7 ")}</div>`:'';})():''}
      ${(()=>{
        const badges=[];
        if(p.gbWins>0)badges.push(`\u26BD GB Winner \u00D7${p.gbWins}`);
@@ -5422,7 +5550,7 @@ function viewTransfers(w){
  const faRows=fa.map(p=>{
    const isScouted=MKT_TAB==='scouted';
    const refused=isScouted&&G.refused&&G.refused[p.id];
-   const fee=isScouted?transferFee(p):p.value;
+   const fee=isScouted?transferFee(p):freeAgentFee(p);
    const can=isScouted
      ?(open&&!refused&&t.budget>=fee&&t.squad.length<SQUAD_MAX)
      :(t.budget>=fee&&t.squad.length<SQUAD_MAX);
@@ -5447,7 +5575,8 @@ function viewTransfers(w){
 function signPlayer(p){
  const t=userTeamObj();
  if(inTheRed())return toast("Signings are frozen while the club is in the red.");
- if(t.budget<p.value)return toast("Not enough in the budget.");
+ const faFee=freeAgentFee(p);
+ if(t.budget<faFee)return toast("Not enough in the budget.");
  if(t.squad.length>=SQUAD_MAX)return toast(`Squad is full (${SQUAD_MAX} max). Sell or release a player to make room.`);
  const askedWage=freeAgentWage(p);
  // A famous free agent's wage is the whole cost of the deal, so make the board test it
@@ -5455,7 +5584,7 @@ function signPlayer(p){
  // but he walks in as the best paid player at the club by a distance.
  if(isMarquee(p)&&askedWage*SEASON_LEN>Math.max(t.budget,0)*2.5)
    return toast(`${p.name} wants ${money(askedWage)}/wk. Your board will not sanction it.`);
- t.budget-=p.value;G.freeAgents=G.freeAgents.filter(x=>x!==p.id);
+ t.budget-=faFee;G.freeAgents=G.freeAgents.filter(x=>x!==p.id);
  p.team=t.id;t.squad.push(p.id);
  p.wage=askedWage;p.contract=newContractYears();delete p.demand;delete p.runningDown;
  joinClub(p,t.id);
@@ -5465,8 +5594,8 @@ function signPlayer(p){
   bs.windowSigns=(bs.windowSigns||0)+1;if(bs.windowSigns>=5)awardBadge("window_warrior");
   if(p.region!==t.region)awardBadge("cross_region");
   if(G.superScout&&(G.superShort||[]).includes(p.id))awardBadge("chief_scout");}
- logAdd(`Signed ${p.name}.`,-p.value);
- toast(`Signed ${p.name} for ${money(p.value)}.`);squadCapNotice();saveGame(true);render();
+ logAdd(`Signed ${p.name}.`,-faFee);
+ toast(`Signed ${p.name} for ${money(faFee)}.`);squadCapNotice();saveGame(true);render();
 }
 function releasePlayer(p){
  const t=userTeamObj();
@@ -5591,13 +5720,15 @@ function viewOffice(w){
   const lab=$(`<div class="card"></div>`);
   const landed=Object.keys(r.done).length;
   lab.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\uD83E\uDDEA Innovation Lab</h3>`));
-  lab.appendChild($(`<div class="small muted" style="margin-bottom:8px">Expensive, slow and genuinely long odds \u2014 nothing here is better than a 30% shot, and the biggest prizes are worse. A project that lands changes a rule of your club permanently. A project that fails takes the money with it and gives you nothing. Every term is stated up front: what it does, what it costs, and exactly what your chances are. ${landed?`<b class="gold">${landed} landed</b>`:"Nothing has landed yet."}</div>`));
+  lab.appendChild($(`<div class="small muted" style="margin-bottom:8px">Long odds on permanent advantages. A project that lands changes a rule of your club forever; one that fails takes the money and gives you nothing back. Tap <b>Details</b> on anything here for the full case before you spend. ${landed?`<b class="gold">${landed} landed</b>`:"Nothing has landed yet."}</div>`));
 
   if(r.active.length){
     lab.appendChild($(`<div class="small" style="margin-bottom:4px"><b>In development</b></div>`));
     r.active.forEach(a=>{
       const p=RND_PROJECTS[a.key];if(!p)return;
-      lab.appendChild($(`<div class="logline"><span>${p.name}</span><span class="muted">${a.seasonsLeft} season${a.seasonsLeft===1?"":"s"} left \u00B7 ~${Math.round(a.chance*100)}%</span></div>`));
+      const row=$(`<div class="logline"><span>${p.name}</span><span class="muted">${a.seasonsLeft} season${a.seasonsLeft===1?"":"s"} left \u00B7 ~${Math.round(a.chance*100)}%</span></div>`);
+      row.style.cursor="pointer";row.onclick=()=>rndDetails(a.key);
+      lab.appendChild(row);
     });
   }
 
@@ -5605,7 +5736,9 @@ function viewOffice(w){
     lab.appendChild($(`<div class="small" style="margin:8px 0 4px"><b class="gold">Operating</b></div>`));
     Object.keys(r.done).forEach(k=>{
       const p=RND_PROJECTS[k];if(!p)return;
-      lab.appendChild($(`<div class="small" style="margin-bottom:4px"><b class="gold">${p.name}</b> <span class="muted">\u00B7 ${p.effect}</span></div>`));
+      const row=$(`<div class="small" style="margin-bottom:4px"><b class="gold">${p.name}</b> <span class="muted">\u00B7 ${p.effect}</span></div>`);
+      row.style.cursor="pointer";row.onclick=()=>rndDetails(k);
+      lab.appendChild(row);
     });
   }
 
@@ -5621,14 +5754,16 @@ function viewOffice(w){
       const box=$(`<div style="margin-bottom:8px;padding:8px;border:1px solid var(--line);border-radius:8px"></div>`);
       const odds=Math.round(p.chance*100);
       box.appendChild($(`<div class="row"><b class="gold">${p.name}</b><span class="small ${odds>=25?"gold":"injtag"}">${odds}% chance</span></div>
-        <div class="small muted" style="margin-top:2px">${p.desc}</div>
-        <div class="small" style="margin-top:4px"><b class="gold">If it works:</b> ${p.effect}</div>
-        <div class="small" style="margin-top:2px"><b style="color:var(--loss)">If it fails:</b> the ${money(cost)} is gone and you get nothing.</div>
-        <div class="small muted" style="margin-top:3px">${money(cost)} paid now \u00B7 result in ${p.years} season${p.years===1?"":"s"} \u00B7 ${Math.round(1/p.chance*10)/10} attempts expected per success${fails?` \u00B7 <span class="injtag">failed ${fails}\u00D7 here, price is up</span>`:""}</div>`));
-      const b=$(`<button class="btn sm ${t.budget>=cost?"":"sec"}" style="margin-top:6px">Commission \u00B7 ${money(cost)}</button>`);
+        <div class="small" style="margin-top:3px">${p.effect}</div>
+        <div class="small muted" style="margin-top:3px">${money(cost)} \u00B7 ${p.years} season${p.years===1?"":"s"} \u00B7 ${money(Math.round(cost/p.chance))} expected before it lands${fails?` \u00B7 <span class="injtag">failed ${fails}\u00D7</span>`:""}</div>`));
+      const row=$(`<div class="row" style="gap:6px;margin-top:8px"></div>`);
+      const det=$(`<button class="btn sm sec" style="flex:1">Details</button>`);
+      det.onclick=()=>rndDetails(k);
+      const b=$(`<button class="btn sm ${t.budget>=cost?"":"sec"}" style="flex:1">Commission</button>`);
       b.disabled=t.budget<cost;
       b.onclick=()=>rndFund(k);
-      box.appendChild(b);
+      row.appendChild(det);row.appendChild(b);
+      box.appendChild(row);
       lab.appendChild(box);
     });
   }
