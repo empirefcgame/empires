@@ -226,12 +226,35 @@ const REGION_EXPANSION={
  kauai:["Hanapepe FC","Eleele United","Kaumakani Town","Puhi FC","Omao Athletic","Kilohana United","Wailua Bay FC"],
  founders:["Rhino Toasterino FC","Cacto Hipopotamo United","Ballerino Lololo Town","Tric Trac Baraboom FC","Pomni Ananas United","Svinino Bombondino Town","Ecco Cavallo FC"]};
 const NAMES={
- deseret:{first:["Nephi","Lehi","Jacob","Enos","Mosiah","Benjamin","Alma","Amulek","Ammon","Aaron",
-   "Helaman","Corianton","Moroni","Mormon","Ether","Jared","Zeniff","Limhi","Gideon","Abinadi",
-   "Pahoran","Teancum","Lachoneus","Samuel","Mathoni","Shemnon","Zeezrom","Nehor","Amaleki","Zoram"],
-  last:["Smith","Young","Pratt","Kimball","Snow","Taylor","Woodruff","Cowdery","Whitmer","Rigdon",
-   "Cannon","Grant","Richards","Hyde","Benson","Talmage","Roberts","McKay","Eyring","Holland",
-   "Maxwell","Packer","Monson","Nelson","Bednar","Uchtdorf","Rasband","Whitney","Bigler","Rockwell"]},
+ /* Deseret's PLAYERS are named out of the Mighty Ducks: character names, the actors who
+    played them, and the language of the rink itself. Firsts and lasts are drawn
+    independently, so the pools cross-multiply into roughly three and a half thousand
+    combinations - Fulton Quackenbush, Zamboni Conway, Charlie Knucklepuck - and a
+    straight character name like Gordon Bombay turns up now and then as a happy
+    accident rather than the rule. Real actors contribute surnames only. Mixing their
+    given names in as well would have let the generator spit out a living person's
+    full name onto a squad list, which is a needless thing to do to somebody. */
+ deseret:{first:[
+   // the roster, across all four
+   "Gordon","Charlie","Adam","Fulton","Greg","Lester","Guy","Connie","Jesse","Terry",
+   "Peter","Dave","Tommy","Tammy","Dean","Luis","Dwayne","Kenny","Julie","Russ",
+   "Casey","Hans","Jan","Ted","Rick","Gunnar","Wolf","Evan","Alex","Sofi",
+   "Nick","Sam","Maya","Jace","Logan","Colin","Koob",
+   // and the sport's own vocabulary, because a striker called Slapshot should exist
+   "Slapshot","Knuckle","Deke","Dangle","Sauce","Wheels","Biscuit","Twig","Flow","Celly",
+   "Chirp","Grinder","Pylon","Sniper","Bardown","Hattrick","Zamboni","Quack","Cake","Oreo",
+   "Bash","Topshelf","Gordie","Crease","Icing","Faceoff","Bantam","Mite"],
+  last:[
+   // characters
+   "Bombay","Conway","Banks","Reed","Goldberg","Averman","Germaine","Moreau","Hall","Mark",
+   "Karp","Duncan","Portman","Mendoza","Robertson","Wu","Gaffney","Tyler","Ducksworth","Reilly",
+   "Riley","Stansson","Stahl","Orion","Huddy","Larson","Tibbles","Morrow","Cole","Chapman",
+   // the actors, surnames only
+   "Estevez","Weiss","Doherty","Larusso","Henson","Schwartz","Tamberelli","Cudlitz","Nordling",
+   "Kling","Ackland","Erbe","Ontkean","Vitar","Simkins","Bhatia","Islam","Noon","Watts",
+   // and the rink
+   "Knucklepuck","Slapshot","Zamboni","Bardown","Barnburner","Backcheck","Blueline","Breakaway",
+   "Toedrag","Sinbin","Quackenbush","Icebreaker"]},
  kauai:{first:["Keanu","Kai","Koa","Ikaika","Makoa","Nainoa","Kekoa","Keoni","Lani","Kaimana",
    "Manu","Nalu","Kanoa","Keahi","Palani","Kawika","Alaka","Hoku","Iolana","Maleko",
    "Noa","Kale","Pika","Aukai","Ekewaka","Haku","Konane","Lono","Makani","Pono"],
@@ -244,6 +267,18 @@ const NAMES={
   last:["Tralala","Crocodilo","Sahur","Assassino","Cappuccina","Larila","Bananini","Patapim","Ambalabu","Troppi",
    "Gusini","Fruttodrillo","Celeste","Bandito","Camelo","Signora","Bicus","Frulli","Toasterino","Zubra",
    "Bombardino","Lololo","Baraboom","Ananas","Cavallo","Kiwi","Milo","Frutti","Sahurini","Tralalelo"]}};
+/* The names Deseret's players used to carry now belong to the people who run the club
+   rather than the ones who play for it: scouts, physios, coaches of every stripe and the
+   man who prices your tickets. Front office is a different world from a dressing room,
+   and it should sound like one. */
+const STAFF_NAMES={
+ first:["Nephi","Lehi","Jacob","Enos","Mosiah","Benjamin","Alma","Amulek","Ammon","Aaron",
+  "Helaman","Corianton","Moroni","Mormon","Ether","Jared","Zeniff","Limhi","Gideon","Abinadi",
+  "Pahoran","Teancum","Lachoneus","Samuel","Mathoni","Shemnon","Zeezrom","Nehor","Amaleki","Zoram"],
+ last:["Smith","Young","Pratt","Kimball","Snow","Taylor","Woodruff","Cowdery","Whitmer","Rigdon",
+  "Cannon","Grant","Richards","Hyde","Benson","Talmage","Roberts","McKay","Eyring","Holland",
+  "Maxwell","Packer","Monson","Nelson","Bednar","Uchtdorf","Rasband","Whitney","Bigler","Rockwell"]};
+function staffName(){return pick(STAFF_NAMES.first)+" "+pick(STAFF_NAMES.last);}
 const COUNTRIES=["USA","Canada","Mexico","Argentina","Brazil","France","England","Spain","Portugal","Germany","Netherlands","Italy","Belgium","Croatia","Uruguay","Colombia","Japan","South Korea","Morocco","Senegal","Switzerland","Denmark","Poland","Serbia","Ecuador","Australia","Nigeria","Ghana","Ivory Coast","Cameroon","Egypt","Tunisia","Algeria","Peru","Chile","Paraguay","Sweden","Norway","Austria","Ukraine","Turkey","Greece","Scotland","Wales","Iran"];
 
 const SCOUT_TIERS={   // roster reveal cost per club, resets each season
@@ -665,7 +700,8 @@ function newPlayer(id,pos,age,regionKey){
  const rk=regionKey||pick(REGIONS).key;const nm=NAMES[rk];
  const p={id,name:pick(nm.first)+" "+pick(nm.last),pos,age,region:rk,nat:pick(COUNTRIES),
    pot:56+Math.floor(Math.pow(Math.random(),1.6)*43),team:null,inj:0,
-   gs:0,gc:0,as:0,ac:0,susp:0,wcWins:0,wcApps:0,tippyWins:0,tippyApps:0,gbWins:0,fame:0};
+   gs:0,gc:0,as:0,ac:0,susp:0,wcWins:0,wcApps:0,tippyWins:0,tippyApps:0,gbWins:0,fame:0,
+   eliteYears:0,topYears:0,leagueWins:0,contWins:0};
  // ~5% of the very brightest 16-year-old prospects (POT 90+) are secretly busts: a
  // real ceiling far below their potential, hidden from everyone including scouts, so
  // they look world-beating on paper but quietly stall and never make it.
@@ -676,7 +712,7 @@ function newPlayer(id,pos,age,regionKey){
 
 function newStaff(id,role){
  const stars=ri(1,5);
- return{id,role,stars,name:pick(NAMES.deseret.first)+" "+pick(NAMES.deseret.last)};}
+ return{id,role,stars,name:staffName()};}
 
 function genWorld(ownerName){
  let pid=0,tid=0;const clubIdx={};
@@ -747,6 +783,10 @@ function genWorld(ownerName){
     infl:1,inflRate:INFL_BASE,inflHist:[1],rnd:{done:{},failed:{},active:[],offers:[]},
     matchBet:null,futuresBets:[],lastBootRace:{},betLog:[],saga:null,_clubIdx:clubIdx};
  rebuildIndex();rebuildTierTeams();
+ // The world does not begin on day one: its thirty-year-olds have had careers, so give
+ // them a record consistent with what they are, or the ceiling would flatten every
+ // veteran in the game to a Marquee on the opening screen.
+ G.players.forEach(p=>seedCareerRecord(p));
  G.players.forEach(p=>p.fame=fameSeed(p));   // the world starts with stars already in it
  G.coachPool=genCoachPool();
 }
@@ -863,7 +903,13 @@ function hydrateLoadedG(){
     ut.leagueTitleSeasons=(G.history||[]).filter(h=>h.tier===0&&h.rank===1).map(h=>h.season);}
  G.players.forEach(p=>{if(p.contract==null)p.contract=ri(2,5);p.gs=p.gs||0;p.gc=p.gc||0;p.as=p.as||0;p.ac=p.ac||0;p.susp=p.susp||0;p.wcWins=p.wcWins||0;p.wcApps=p.wcApps||0;p.tippyWins=p.tippyWins||0;p.tippyApps=p.tippyApps||0;p.gbWins=p.gbWins||0});
  // stardom: an existing career gets fame seeded from what the player has already done
+ // Career counters arrived with the Icon rework. An existing save has none, so derive
+ // them the same way a mid-life player is seeded, then let the ceiling re-price every
+ // reputation in the world. Some existing Icons will correctly settle back to Marquee:
+ // they were Icons because form alone used to be enough, and it no longer is.
+ G.players.forEach(p=>seedCareerRecord(p));
  G.players.forEach(p=>{if(typeof p.fame!=="number"||isNaN(p.fame))p.fame=fameSeed(p)});
+ G.players.forEach(p=>{if(typeof p.fame==="number")p.fame=Math.min(p.fame,fameCareerCeil(p));});
  // inflation index: an older save simply starts its clock now
  G.players.forEach(p=>{if(p.natDuty)delete p.natDuty;});
  rndState();if(!G.rnd.offers.length&&!G.rnd.active.length)rndDrawOffers();
@@ -1413,6 +1459,23 @@ function famePill(p){
 }
 /* Seeded at world gen and backfilled on load, so a universe never starts starless
    and an existing career does not have to wait a decade for fame to accumulate. */
+/* Back-fills a plausible career record onto a player who is being dropped into a world
+   mid-life: how many seasons he is likely to have spent among the best, what he is
+   likely to have won. Derived from what we can see - his age, his rating, his goals -
+   so a 33-year-old 92-rated forward reads like a man with a decade behind him, and a
+   28-year-old squad defender reads like exactly what he is. Only ever fills blanks. */
+function seedCareerRecord(p){
+ if(!p)return;
+ const yrs=clamp(p.age-18,0,20);
+ if(p.eliteYears==null){
+   const eliteRate=p.ovr>=90?0.55:p.ovr>=86?0.32:p.ovr>=82?0.12:0;
+   p.eliteYears=Math.round(yrs*eliteRate*fameRole(p));
+ }
+ if(p.topYears==null)p.topYears=Math.round((p.eliteYears||0)*(p.ovr>=92?0.4:0.15));
+ if(p.leagueWins==null)p.leagueWins=Math.round(yrs*(p.ovr>=88?0.28:p.ovr>=82?0.14:0.05));
+ if(p.contWins==null)p.contWins=Math.round(yrs*(p.ovr>=90?0.12:p.ovr>=84?0.05:0));
+ if(!p.ac)p.ac=Math.round(yrs*SEASON_LEN*0.62);
+}
 function fameSeed(p){
  if(!p||p.team==null)return 0;
  let f=0;
@@ -1423,6 +1486,7 @@ function fameSeed(p){
  if(p.age>=30)f*=1.15;                                // veterans have had time to become known
  f*=fameRole(p);
  f+=Math.min(12,(p.gbWins||0)*6)+Math.min(10,(p.gc||0)/25);
+ f=Math.min(f,fameCareerCeil(p));
  if(inAcademy(p))f=Math.min(f,FAME_ACADEMY_CEIL);
  return clamp(Math.round(f),0,100);
 }
@@ -1431,7 +1495,63 @@ function fameSeed(p){
    and a Golden Boot keep him a household name for the rest of his career. */
 function fameFloor(p){
  if(!p)return 0;
- return Math.min(74,(p.gbWins||0)*9+(p.gc||0)*0.26+(p.wcWins||0)*4+(p.tippyWins||0)*3);
+ const fl=Math.min(74,(p.gbWins||0)*9+(p.gc||0)*0.26+(p.wcWins||0)*4+(p.tippyWins||0)*3);
+ return Math.min(fl,fameCareerCeil(p));
+}
+/* ======================= THE CAREER CEILING =======================
+   Being the best player in the world this season is not the same thing as being an
+   Icon, and conflating the two is what let a twenty-three-year-old with one Golden Boot
+   stand alongside the greatest careers the game has produced. Icon is a VERDICT ON A
+   CAREER. It should take most of one.
+
+   So fame still moves with form, but it can never exceed what a man's record actually
+   supports. Current brilliance alone tops out in the high Marquee band: famous, sells
+   tickets, the best player alive - and still not an Icon, because he has not done it
+   for long enough yet. Every extra point above that has to be BOUGHT with something
+   permanent: a Golden Boot, a career goal tally, a continental crown, another season
+   finishing among the ten best players in the world. That is the difference between
+   the best young player in the game and Messi, and it is now the difference the number
+   actually measures.
+
+   The practical effect is that a great young player sits pinned just under the Icon
+   line for years, visibly close and visibly short, and crosses it only when the
+   trophies and the numbers come in. Which is exactly how it works. */
+const FAME_FORM_CEIL=62;      // what pure, current, world-best form can carry you to
+function fameCareerCeil(p){
+ if(!p)return 100;
+ let c=FAME_FORM_CEIL;
+ c+=Math.min(30,(p.gbWins||0)*5);            // Golden Boots: the single loudest line
+ c+=Math.min(14,(p.gc||0)*0.055);            // a career's worth of goals
+ c+=Math.min(8,(p.ac||0)*0.022);             // longevity: he was there for years
+ c+=Math.min(12,(p.eliteYears||0)*2);        // seasons among the ten best alive
+ c+=Math.min(8,(p.topYears||0)*2.5);         // seasons among the best three alive
+ c+=Math.min(12,(p.contWins||0)*3);          // continental crowns
+ c+=Math.min(9,(p.leagueWins||0)*1.5);       // league titles he actually played for
+ c+=(p.wcWins||0)*5+(p.tippyWins||0)*3;
+ /* And a hard gate under all of it. Without one, the cheapest route to Icon needed no
+    honours whatsoever: a prodigy who was simply the highest-rated player alive from
+    nineteen banked six elite seasons and crossed the line at twenty-two with an empty
+    cabinet. Counting SEASONS does not fix it either, because this world lets a boy
+    debut at sixteen and play every game, so his season count saturates while he is
+    still a kid. Age is the honest measure. Icon is a verdict on a career and careers
+    take years of a life, not just a run of good form: the line is unreachable before
+    the late twenties no matter how early he arrived, and the ceiling keeps climbing
+    through his thirties as the body of work grows. */
+ c=Math.min(c,FAME_FORM_CEIL+Math.max(0,(p.age||0)-20)*2.6);
+ return clamp(c,0,100);
+}
+/* A short, readable account of why he is (or is not) an Icon yet. */
+function fameResume(p){
+ if(!p)return [];
+ const r=[];
+ if(p.gbWins)r.push(`${p.gbWins} Golden Boot${p.gbWins===1?"":"s"}`);
+ if(p.eliteYears)r.push(`${p.eliteYears} season${p.eliteYears===1?"":"s"} in the world's top ten`);
+ if(p.topYears)r.push(`${p.topYears} in the top three`);
+ if(p.contWins)r.push(`${p.contWins} ${CONT_CUP}${p.contWins===1?"":"s"}`);
+ if(p.leagueWins)r.push(`${p.leagueWins} league title${p.leagueWins===1?"":"s"}`);
+ if(p.wcWins)r.push(`${p.wcWins} ${WORLD_CUP.replace("The ","")}`);
+ if(p.tippyWins)r.push(`${p.tippyWins} Tippy Cup${p.tippyWins===1?"":"s"}`);
+ return r;
 }
 /* Hype gets a prodigy noticed, but it is capped: it can carry you to Marquee and no
    further. Becoming an Icon requires actually producing. Without the cap, five straight
@@ -1601,10 +1721,15 @@ function fameTick(){
    const t=(p.seasonClub!=null?T(p.seasonClub):null)||(p.team!=null?T(p.team):null);
    if(t&&!acad&&apps>=4){
      const share=clamp(apps/SEASON_LEN,0,1);
-     if((t.leagueTitleSeasons||[]).includes(G.season))f+=5*share;
-     if(cont&&cont.winner===t.name)f+=12*share;
+     const wonLeague=(t.leagueTitleSeasons||[]).includes(G.season);
+     const wonCont=!!(cont&&cont.winner===t.name);
+     if(wonLeague){f+=5*share;if(apps>=6)p.leagueWins=(p.leagueWins||0)+1;}
+     if(wonCont){f+=12*share;if(apps>=6)p.contWins=(p.contWins||0)+1;}
    }
    const r=acad?0:rank[p.id];
+   // A season finishing among the very best alive is a permanent line on the record,
+   // not just a fame bonus that decays away. This is what a long career is MADE of.
+   if(r&&r<=10&&apps>=6){p.eliteYears=(p.eliteYears||0)+1;if(r<=3)p.topYears=(p.topYears||0)+1;}
    // Standing: being among the best alive is itself fame, and the very top of the
    // world is a different order of famous again. This is the Haaland route.
    if(r&&r<=10)f+=((11-r)*0.75+(r<=3?4:0))*fameRole(p);
@@ -1613,6 +1738,8 @@ function fameTick(){
    if(!acad&&p.age<=24&&p.ovr>=88&&apps>=4)f+=5*fameRole(p);   // arrived early
    if(bestGk&&p.id===bestGk.id&&p.ovr>=90)f+=9;        // the undisputed best keeper alive
    f=Math.max(f,fameFloor(p));
+   // Form can make you the most famous player alive. Only a CAREER makes you an Icon.
+   f=Math.min(f,fameCareerCeil(p));
    if(acad)f=Math.min(f,FAME_ACADEMY_CEIL);
    p.fame=clamp(Math.round(f),0,100);
  });
@@ -1799,7 +1926,7 @@ function dealTargetsMet(t){if(!t.sponsor)return 0;const tg=SHOE_TIERS[t.sponsor.
 function signDeal(t,brandKey,startSeason){
  const bi=brandInfo(brandKey);if(!bi)return;
  t.sponsor={brand:brandKey,tier:bi.tier,start:startSeason};
- const bonus=SHOE_TIERS[bi.tier].value;t.budget+=bonus;
+ const bonus=shoeValueOf(bi.tier);t.budget+=bonus;
  if(t.id===G.userTeam)logAdd(`Signed a ${SHOE_TIERS[bi.tier].name}-tier shoe deal with ${bi.name}! Signing bonus ${money(bonus)}.`,bonus);}
 function endDeal(t){t.sponsor=null;}
 /* Runs each season end (before the season counter ticks): pays every active deal at
@@ -1812,8 +1939,8 @@ function sponsorTick(){
    const d=t.sponsor,played=(G.season-d.start+1);
    if(played<1)return;                                   // signed for next season, not yet active
    if(played<=SHOE_DEAL_LEN&&!d.renewDue){               // full annual payment through the term
-     t.budget+=SHOE_TIERS[d.tier].value;
-     if(t.id===G.userTeam)logAdd(`${brandInfo(d.brand).name} shoe deal: annual payment.`,SHOE_TIERS[d.tier].value);
+     t.budget+=shoeValueOf(d.tier);
+     if(t.id===G.userTeam)logAdd(`${brandInfo(d.brand).name} shoe deal: annual payment.`,shoeValueOf(d.tier));
    }
    if(played>=SHOE_DEAL_LEN&&!d.renewDue){               // end of the 10-year term
      const met=dealTargetsMet(t)>=3;
@@ -1823,7 +1950,7 @@ function sponsorTick(){
          logAdd(`${brandInfo(d.brand).name} deal complete \u2014 targets met! Renew for another decade or hear rival pitches.`);}
        else{logAdd(`${brandInfo(d.brand).name} deal ended: targets missed \u2014 they walk away.`);endDeal(t);}
      }else{
-       if(met){d.start=G.season+1;t.budget+=SHOE_TIERS[d.tier].value;}  // AI auto-renews for another term
+       if(met){d.start=G.season+1;t.budget+=shoeValueOf(d.tier);}  // AI auto-renews for another term
        else endDeal(t);
      }
    }
@@ -3006,9 +3133,10 @@ function finishGroups(){
  c.log.unshift({round:"Group stage",line:"16 clubs advance to the Round of 16."});
  if(qual.includes(G.userTeam)){
    if(bestThirds.includes(G.userTeam))awardBadge("group_heroes");
-   T(G.userTeam).budget+=QUALIFY_BONUS;
-   logAdd(`${CUP}: qualified for the Round of 16.`,QUALIFY_BONUS);
-   if(!QUIET)toast(`${CUP}: you qualified for the knockouts! +${money(QUALIFY_BONUS)}`);
+   {const qb=IN(QUALIFY_BONUS);
+    T(G.userTeam).budget+=qb;
+    logAdd(`${CUP}: qualified for the Round of 16.`,qb);
+    if(!QUIET)toast(`${CUP}: you qualified for the knockouts! +${money(qb)}`);}
    nextKoUserGame();
  }else{
    c.userOut=true;logAdd(`${CUP}: eliminated in the group stage.`);
@@ -3826,37 +3954,44 @@ function userReleaseYouth(p){
    project again by a quarter, so chasing a moonshot you keep missing gets genuinely
    expensive - which is exactly the shape of real research spending. */
 const RND_PROJECTS={
- medical:{name:"Biometric Load Management",cost:40e6,years:1,chance:0.55,
-  desc:"Wearables on every player and a workload model that flags a breakdown before it happens.",
-  effect:"Injuries are roughly a third shorter, and your treatment room finds an extra day here and there."},
- pricing:{name:"Dynamic Pricing Engine",cost:35e6,years:1,chance:0.60,
+ pricing:{name:"Dynamic Pricing Engine",cost:35e6,years:1,chance:0.30,
   desc:"Price every seat against live demand instead of setting one number for the season.",
-  effect:"Gate receipts rise 15% at every home fixture, forever."},
- setpiece:{name:"Set Piece Laboratory",cost:45e6,years:1,chance:0.35,
+  effect:"Gate receipts +15% at every home fixture, permanently."},
+ medical:{name:"Biometric Load Management",cost:40e6,years:1,chance:0.28,
+  desc:"Wearables on every player and a workload model that flags a breakdown before it happens.",
+  effect:"Injury spells 34% shorter, plus a 35% chance each matchday of recovering an extra day."},
+ setpiece:{name:"Set Piece Laboratory",cost:45e6,years:1,chance:0.24,
   desc:"A dedicated analysis unit and a training pitch that does nothing else all week.",
-  effect:"A permanent edge in every match your side plays."},
- scouting:{name:"Predictive Scouting Model",cost:60e6,years:1,chance:0.45,
-  desc:"A model that reads a player's ceiling out of match data rather than a scout's eye.",
-  effect:"You see the true potential of every player in the world, at any club, without ever paying to scout again."},
- contracts:{name:"Contract Valuation Model",cost:50e6,years:2,chance:0.42,
+  effect:"+0.9 to your side's match boost in every fixture, home and away, forever."},
+ contracts:{name:"Contract Valuation Model",cost:50e6,years:2,chance:0.24,
   desc:"Prices a player's next deal more accurately than his agent can.",
-  effect:"Wage demands from your own players fall 15%."},
- sponsor:{name:"Fan Data Exchange",cost:65e6,years:2,chance:0.45,
-  desc:"Turns a supporter base into an audience that sponsors bid against each other for.",
-  effect:"Sponsorship income rises 25%."},
- merch:{name:"Global Merchandise Platform",cost:55e6,years:2,chance:0.50,
+  effect:"Every wage demand from your own players is 15% lower."},
+ merch:{name:"Global Merchandise Platform",cost:55e6,years:2,chance:0.22,
   desc:"Direct-to-fan distribution in every market your club plays in.",
-  effect:"Merchandise income rises 30%."},
- dna:{name:"Genomic Talent Screening",cost:70e6,years:2,chance:0.40,
+  effect:"Merchandise income +30% every matchday, permanently."},
+ scouting:{name:"Predictive Scouting Model",cost:60e6,years:1,chance:0.20,
+  desc:"A model that reads a player's ceiling out of match data rather than a scout's eye.",
+  effect:"See the true potential of every player at every club in the world, forever, without ever paying a reveal fee again."},
+ sponsor:{name:"Fan Data Exchange",cost:65e6,years:2,chance:0.20,
+  desc:"Turns a supporter base into an audience that sponsors bid against each other for.",
+  effect:"Sponsorship income +25% every matchday, permanently."},
+ dna:{name:"Genomic Talent Screening",cost:70e6,years:2,chance:0.18,
   desc:"Screen every intake for ceiling rather than for what a sixteen-year-old can already do.",
-  effect:"Academy intake arrives with materially higher potential, every season, forever."},
- neuro:{name:"Neuro-Cognitive Training Suite",cost:90e6,years:2,chance:0.38,
-  desc:"Decision-making drills in simulation, run against the situations your side actually faces.",
-  effect:"Every under-23 on your books develops faster than anyone else's."},
- negotiation:{name:"Transfer Market Analytics",cost:80e6,years:2,chance:0.40,
+  effect:"Every academy intake arrives with +6 to +13 potential, every season, forever."},
+ negotiation:{name:"Transfer Market Analytics",cost:80e6,years:2,chance:0.15,
   desc:"Models a selling club's real reserve price instead of believing its asking price.",
-  effect:"Every transfer fee you pay falls 12%."}
+  effect:"Every transfer fee you pay is 12% lower."},
+ neuro:{name:"Neuro-Cognitive Training Suite",cost:90e6,years:2,chance:0.12,
+  desc:"Decision-making drills in simulation, run against the situations your side actually faces.",
+  effect:"Every under-23 at your club gains up to +2 extra attribute points a season, on top of everything else."}
 };
+/* Odds are deliberately long and they get longer as the prize gets bigger: the cheapest
+   project on the board is under a third, and the one that would change your academy
+   forever is one in eight. A moonshot you can expect to land is not a moonshot, it is a
+   purchase, and a purchase does not make a bank balance mean anything. What a president
+   is owed in exchange for those odds is complete information BEFORE he commits: every
+   project states its exact effect as a number, its exact price, its exact duration and
+   its exact chance. The gamble should be honest, not obscure. */
 const RND_OFFER_COUNT=3;
 function rndState(){
  if(!G.rnd)G.rnd={done:{},failed:{},active:[],offers:[]};
@@ -3871,8 +4006,11 @@ function rndActive(key){return rndState().active.some(a=>a.key===key);}
 /* Each failure makes the next attempt at that project a quarter dearer. */
 function rndCost(key){
  const p=RND_PROJECTS[key];if(!p)return 0;
- const fails=(rndState().failed[key]||0);
- return IN(Math.round(p.cost*Math.pow(1.25,fails)));
+ // Each failure raises the price of trying again, but gently and with a ceiling: with
+ // odds this long a president will fail often, and compounding a quarter each time
+ // would price a determined one out of his own research department by the third go.
+ const fails=Math.min(6,(rndState().failed[key]||0));
+ return IN(Math.round(p.cost*Math.pow(1.12,fails)));
 }
 function rndDrawOffers(){
  const r=rndState();
@@ -3888,7 +4026,7 @@ function rndFund(key){
  if(rndActive(key))return toast("That project is already running.");
  const cost=rndCost(key);
  if(t.budget<cost)return toast(`Need ${money(cost)} to commission this.`);
- if(!confirm(`Commission ${p.name} for ${money(cost)}? It runs for ${p.years} season${p.years===1?"":"s"} and has roughly a ${Math.round(p.chance*100)}% chance of working. If it fails the money is gone.`))return;
+ if(!confirm(`Commission ${p.name} for ${money(cost)}?\n\nIF IT WORKS: ${p.effect}\nIF IT FAILS: the ${money(cost)} is gone and you get nothing.\n\nChance of success: ${Math.round(p.chance*100)}%. Result in ${p.years} season${p.years===1?"":"s"}.`))return;
  t.budget-=cost;
  r.active.push({key,seasonsLeft:p.years,chance:p.chance,cost,started:G.season});
  r.offers=r.offers.filter(k=>k!==key);
@@ -4055,6 +4193,12 @@ function inWindow(){return G.matchday===0&&G.window&&G.window.day<=3;}
 function scoutInfo(){return SCOUT_TIERS[G.scoutTier||"none"];}
 function isScouted(id){return !!(G.scouted&&G.scouted[id]);}
 function scoutCost(){return IN(scoutInfo().cost);}
+/* Every price a president is shown must be the price he is actually charged. The
+   accessors below exist because the raw constants are season-1 money and the office
+   was quoting them forever while the ledger charged today's. */
+function scoutWageOf(key){return IN(SCOUT_TIERS[key].wage);}
+function scoutRevealOf(key){return IN(SCOUT_TIERS[key].cost);}
+function shoeValueOf(tier){return IN(SHOE_TIERS[tier].value);}
 function canSeePot(teamId){
  if(teamId==null)return false;
  if(teamId===G.userTeam)return true;
@@ -4296,6 +4440,10 @@ function showPlayer(id){
    <div class="row"><div><h3 style="font-size:17px">${p.name}${p.age>=40?'<span class="ret">R</span>':''}</h3>
      <div class="small muted">${club} \u00B7 <span class="pos ${p.pos}">${p.pos}</span> \u00B7 ${p.age}y \u00B7 ${p.nat||"?"}</div>
      ${isMarquee(p)?`<div class="small" style="margin-top:2px">${famePill(p)}<span class="muted">Stardom ${fameOf(p)} \u00B7 ${isIcon(p)?"known across the football world":"a name that sells tickets"}</span></div>`:''}
+     ${isMarquee(p)?(()=>{const res=fameResume(p),ceil=fameCareerCeil(p);
+       return `<div class="small muted" style="margin-top:2px">${res.length?`Career: ${res.join(" \u00B7 ")}. `:""}${isIcon(p)
+         ? `His record carries him to Icon.`
+         : `His record supports a stardom of ${ceil}. Icon starts at ${FAME_ICON}, and it is earned over a career, not a season.`}</div>`;})():''}
      ${(()=>{
        const badges=[];
        if(p.gbWins>0)badges.push(`\u26BD GB Winner \u00D7${p.gbWins}`);
@@ -5377,7 +5525,7 @@ function viewOffice(w){
    const hireBox=$(`<div style="margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:8px"></div>`);
    hireBox.appendChild($(`<div class="small muted">Hire a ticket manager (${money(ticketMgrWage())}/wk) to set the revenue-maximising price for every home fixture automatically \u2014 no more setting it by hand.</div>`));
    const hire=$(`<button class="btn sm" style="margin-top:8px">Hire ticket manager \u00B7 ${money(ticketMgrWage())}/wk</button>`);
-   hire.onclick=()=>{G.ticketManager={name:pick(NAMES.deseret.first)+" "+pick(NAMES.deseret.last)};
+   hire.onclick=()=>{G.ticketManager={name:staffName()};
      logAdd(`Hired ${G.ticketManager.name} to manage ticket pricing.`);saveGame(true);render();};
    hireBox.appendChild(hire);
    fc.appendChild(hireBox);
@@ -5443,7 +5591,7 @@ function viewOffice(w){
   const lab=$(`<div class="card"></div>`);
   const landed=Object.keys(r.done).length;
   lab.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\uD83E\uDDEA Innovation Lab</h3>`));
-  lab.appendChild($(`<div class="small muted" style="margin-bottom:8px">Expensive, slow and genuinely risky. A project that lands changes a rule of your club permanently. A project that fails takes the money with it. ${landed?`<b class="gold">${landed} landed</b>`:"Nothing has landed yet."}</div>`));
+  lab.appendChild($(`<div class="small muted" style="margin-bottom:8px">Expensive, slow and genuinely long odds \u2014 nothing here is better than a 30% shot, and the biggest prizes are worse. A project that lands changes a rule of your club permanently. A project that fails takes the money with it and gives you nothing. Every term is stated up front: what it does, what it costs, and exactly what your chances are. ${landed?`<b class="gold">${landed} landed</b>`:"Nothing has landed yet."}</div>`));
 
   if(r.active.length){
     lab.appendChild($(`<div class="small" style="margin-bottom:4px"><b>In development</b></div>`));
@@ -5471,10 +5619,12 @@ function viewOffice(w){
       const p=RND_PROJECTS[k];if(!p)return;
       const cost=rndCost(k),fails=r.failed[k]||0;
       const box=$(`<div style="margin-bottom:8px;padding:8px;border:1px solid var(--line);border-radius:8px"></div>`);
-      box.appendChild($(`<div class="small"><b class="gold">${p.name}</b></div>
+      const odds=Math.round(p.chance*100);
+      box.appendChild($(`<div class="row"><b class="gold">${p.name}</b><span class="small ${odds>=25?"gold":"injtag"}">${odds}% chance</span></div>
         <div class="small muted" style="margin-top:2px">${p.desc}</div>
-        <div class="small" style="margin-top:3px"><b>If it works:</b> ${p.effect}</div>
-        <div class="small muted" style="margin-top:3px">${money(cost)} \u00B7 ${p.years} season${p.years===1?"":"s"} \u00B7 roughly ${Math.round(p.chance*100)}% chance${fails?` \u00B7 <span class="injtag">failed ${fails}\u00D7 before, price is up</span>`:""}</div>`));
+        <div class="small" style="margin-top:4px"><b class="gold">If it works:</b> ${p.effect}</div>
+        <div class="small" style="margin-top:2px"><b style="color:var(--loss)">If it fails:</b> the ${money(cost)} is gone and you get nothing.</div>
+        <div class="small muted" style="margin-top:3px">${money(cost)} paid now \u00B7 result in ${p.years} season${p.years===1?"":"s"} \u00B7 ${Math.round(1/p.chance*10)/10} attempts expected per success${fails?` \u00B7 <span class="injtag">failed ${fails}\u00D7 here, price is up</span>`:""}</div>`));
       const b=$(`<button class="btn sm ${t.budget>=cost?"":"sec"}" style="margin-top:6px">Commission \u00B7 ${money(cost)}</button>`);
       b.disabled=t.budget<cost;
       b.onclick=()=>rndFund(k);
@@ -5555,7 +5705,7 @@ function viewOffice(w){
   const sp=$(`<div class="card"></div>`);
   sp.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">\uD83D\uDC5F Shoe sponsorship</h3>`));
   if(!G.liaison){
-    sp.appendChild($(`<div class="small muted" style="margin-bottom:8px">Hire a shoe brand liaison (${money(liaisonWage())}/wk) to chase a sponsorship. They spend a season being evaluated by the brands, then bring a pitch. Deals run ${SHOE_DEAL_LEN} seasons: a signing bonus plus a yearly fee, with cumulative on-field targets to keep the brand happy (hit 3 of 4). Tiers: Gold ${money(SHOE_TIERS.gold.value)}/yr, Silver ${money(SHOE_TIERS.silver.value)}/yr, Bronze ${money(SHOE_TIERS.bronze.value)}/yr.</div>`));
+    sp.appendChild($(`<div class="small muted" style="margin-bottom:8px">Hire a shoe brand liaison (${money(liaisonWage())}/wk) to chase a sponsorship. They spend a season being evaluated by the brands, then bring a pitch. Deals run ${SHOE_DEAL_LEN} seasons: a signing bonus plus a yearly fee, with cumulative on-field targets to keep the brand happy (hit 3 of 4). Tiers: Gold ${money(shoeValueOf("gold"))}/yr, Silver ${money(shoeValueOf("silver"))}/yr, Bronze ${money(shoeValueOf("bronze"))}/yr.</div>`));
     const b=$(`<button class="btn sm">Hire liaison \u00B7 ${money(liaisonWage())}/wk</button>`);b.onclick=hireLiaison;sp.appendChild(b);
   }else if(t.sponsor){
     const d=t.sponsor,bi=brandInfo(d.brand),tier=SHOE_TIERS[d.tier];
@@ -5564,20 +5714,20 @@ function viewOffice(w){
     const labels={conrad:"Conrad Cups",gb:"Golden Boots",regional:"Regional Cups",league:"League titles"};
     if(d.renewDue){
       sp.appendChild($(`<div class="small" style="margin-bottom:6px"><b class="gold">${bi.name}</b> (${tier.name} tier) \u2014 your 10-year deal is complete and you <b class="gold">hit the targets</b> (${met}/4). Renew for another decade, or hear rival pitches:</div>`));
-      const rb=$(`<button class="btn sm" style="margin-bottom:8px">Renew with ${bi.name} \u00B7 ${money(tier.value)}/yr + ${money(tier.value)} bonus</button>`);rb.onclick=renewShoeDeal;sp.appendChild(rb);
+      const rb=$(`<button class="btn sm" style="margin-bottom:8px">Renew with ${bi.name} \u00B7 ${money(shoeValueOf(bi.tier))}/yr + ${money(shoeValueOf(bi.tier))} bonus</button>`);rb.onclick=renewShoeDeal;sp.appendChild(rb);
       const offers=(G.liaisonCycle&&G.liaisonCycle.offers)||[];
       if(offers.length){
         sp.appendChild($(`<div class="small muted" style="margin-bottom:6px">Rival pitches:</div>`));
         offers.forEach((o,i)=>{const obi=brandInfo(o.brand),ot=SHOE_TIERS[o.tier];
           const box=$(`<div style="margin-bottom:8px;padding:10px;border:1px solid var(--line);border-radius:8px"></div>`);
-          box.appendChild($(`<div class="small"><b>${obi.name}</b> \u00B7 ${ot.name} tier \u00B7 ${money(ot.value)}/yr + bonus${o.bump?` <span style="color:var(--loss)">(replaces ${T(o.bump)?T(o.bump).name:"a rival"})</span>`:""}</div>`));
+          box.appendChild($(`<div class="small"><b>${obi.name}</b> \u00B7 ${ot.name} tier \u00B7 ${money(IN(ot.value))}/yr + bonus${o.bump?` <span style="color:var(--loss)">(replaces ${T(o.bump)?T(o.bump).name:"a rival"})</span>`:""}</div>`));
           const ab=$(`<button class="btn sm" style="margin-top:6px">Switch to ${obi.name}</button>`);ab.onclick=()=>acceptShoeOffer(i);box.appendChild(ab);
           sp.appendChild(box);});
       }
       const dec=$(`<button class="btn sm sec">End the partnership</button>`);dec.onclick=declineShoeOffers;sp.appendChild(dec);
     }else{
       sp.appendChild($(`<div class="small" style="margin-bottom:4px">Sponsored by <b class="gold">${bi.name}</b> (${tier.name} tier) \u00B7 Year ${year} of ${SHOE_DEAL_LEN}</div>`));
-      sp.appendChild($(`<div class="small muted" style="margin-bottom:6px">Pays ${money(tier.value)}/yr for the full term \u2014 funding is secure regardless of pace.</div>`));
+      sp.appendChild($(`<div class="small muted" style="margin-bottom:6px">Pays ${money(IN(tier.value))}/yr for the full term \u2014 funding is secure regardless of pace.</div>`));
       const grid=$(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px"></div>`);
       SHOE_KEYS.forEach(k=>{const need=tier.targets[k],have=pr[k],ok=have>=need;
         grid.appendChild($(`<div class="small" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px">${ok?'<span class="gold">\u2714</span> ':''}${labels[k]}<br><b class="${ok?'gold':''}">${have}</b> / ${need}</div>`));});
@@ -5591,7 +5741,7 @@ function viewOffice(w){
       const bi=brandInfo(o.brand),tier=SHOE_TIERS[o.tier];
       const box=$(`<div style="margin-bottom:8px;padding:10px;border:1px solid var(--honey);border-radius:8px"></div>`);
       const tg=tier.targets;
-      box.appendChild($(`<div class="small"><b class="gold">${bi.name}</b> \u00B7 ${tier.name} tier \u00B7 ${money(tier.value)}/yr + ${money(tier.value)} signing bonus</div>`));
+      box.appendChild($(`<div class="small"><b class="gold">${bi.name}</b> \u00B7 ${tier.name} tier \u00B7 ${money(IN(tier.value))}/yr + ${money(IN(tier.value))} signing bonus</div>`));
       box.appendChild($(`<div class="small muted" style="margin-top:3px">Keep it: ${tg.conrad} Conrad, ${tg.gb} Golden Boots, ${tg.regional} Regional Cups, ${tg.league} league titles over ${SHOE_DEAL_LEN} seasons (any 3 of 4).${o.bump?` <span style="color:var(--loss)">Replaces ${T(o.bump)?T(o.bump).name:"a rival"} at this brand.</span>`:""}</div>`));
       const ab=$(`<button class="btn sm" style="margin-top:8px">Sign with ${bi.name}</button>`);ab.onclick=()=>acceptShoeOffer(i);box.appendChild(ab);
       sp.appendChild(box);
@@ -5603,7 +5753,7 @@ function viewOffice(w){
     ["gold","silver","bronze"].forEach(tier=>{
       const q=shoeQualifies(t,tier),open=!!openBrandInTier(tier);
       const status=q?(open?'<span class="gold">Interested \u2014 slot open</span>':'<span style="color:var(--draw)">Interested \u2014 must out-do a current club</span>'):'<span class="muted">Out of reach</span>';
-      sp.appendChild($(`<div class="small" style="margin-bottom:3px">${SHOE_TIERS[tier].name} (${money(SHOE_TIERS[tier].value)}/yr): ${status}</div>`));
+      sp.appendChild($(`<div class="small" style="margin-bottom:3px">${SHOE_TIERS[tier].name} (${money(shoeValueOf(tier))}/yr): ${status}</div>`));
     });
     const fb=$(`<button class="btn sm sec" style="margin-top:8px">Release liaison</button>`);fb.onclick=fireLiaison;sp.appendChild(fb);
   }
@@ -5676,10 +5826,10 @@ function viewOffice(w){
  w.appendChild(cc);
 
  scc.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Scouting department</h3>
-   <div class="small muted" style="margin-bottom:8px">A better scout hires for more per week but makes scouting rival squads far cheaper, and reveals potential. Current: <b class="gold">${scoutInfo().label}</b> \u00B7 reveal cost ${money(scoutInfo().cost)}/club/season.</div>`));
+   <div class="small muted" style="margin-bottom:8px">A better scout hires for more per week but makes scouting rival squads far cheaper, and reveals potential. Current: <b class="gold">${scoutInfo().label}</b> \u00B7 reveal cost ${money(scoutCost())}/club/season.</div>`));
  [["gold","Gold"],["silver","Silver"],["bronze","Bronze"]].forEach(([key,lab])=>{
    const inf=SCOUT_TIERS[key];const active=G.scoutTier===key;
-   const r=$(`<div class="row" style="margin:5px 0"><span class="small">${lab} \u00B7 ${money(inf.wage)}/wk \u00B7 reveal ${money(inf.cost)}/club</span></div>`);
+   const r=$(`<div class="row" style="margin:5px 0"><span class="small">${lab} \u00B7 ${money(scoutWageOf(key))}/wk \u00B7 reveal ${money(scoutRevealOf(key))}/club</span></div>`);
    const b=$(`<button class="btn sm ${active?'sec':''}">${active?"Hired":"Hire"}</button>`);
    b.disabled=active;
    b.onclick=()=>{G.scoutTier=key;logAdd(`Appointed a ${lab} scout.`);saveGame(true);render()};
@@ -6048,7 +6198,7 @@ function viewWorldTeam(w,id){
  if(!seen){
    const sc=$(`<div class="card center"></div>`);
    sc.appendChild($(`<div class="small" style="margin-bottom:8px">Their squad is hidden. Scout them to reveal the roster${sInfo.pot?" and player potential":""} for the rest of this season.</div>`));
-   const b=$(`<button class="btn">Scout squad \u00B7 ${money(sInfo.cost)}</button>`);
+   const b=$(`<button class="btn">Scout squad \u00B7 ${money(IN(sInfo.cost))}</button>`);
    b.disabled=userTeamObj().budget<sInfo.cost;
    b.onclick=()=>buyScout(id);sc.appendChild(b);
    if(!sInfo.pot)sc.appendChild($(`<div class="small muted" style="margin-top:6px">Without a scout on staff you can see names and ratings, but not potential. Hire a Bronze, Silver or Gold scout in the Office.</div>`));
