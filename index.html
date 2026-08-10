@@ -159,6 +159,37 @@ const money=n=>{const s=n<0?'-':'';n=Math.abs(Math.round(n));
   if(n>=1e6)return s+'£'+(n/1e6).toFixed(n>=1e7?0:1)+'M';
   if(n>=1e3)return s+'£'+Math.round(n/1e3)+'k';return s+'£'+n};
 
+/* ======================= INFLATION =======================
+   Football's economy does not stand still. Every season the whole world gets dearer:
+   gates, sponsorship, TV, transfer fees, wages, construction. One index drives all of
+   it, so the £40k/wk that made a man the best paid player in season 1 is a squad
+   filler's money by season 15. Wages compound a little faster than prices, which is
+   what happens in the real game and is what squeezes a club that stands still.
+   A CONTRACTED player keeps the number he signed for. His pay only moves when the deal
+   is renegotiated - that is what a contract is FOR - which means an old deal quietly
+   becomes a bargain while every new signing costs more than the last one did. */
+const INFL_BASE=0.048;        // long-run trend, about 4.8% a season
+const INFL_WAGE_POW=1.10;     // wages compound a shade faster than prices
+function inflIndex(){const v=(typeof G!=="undefined"&&G&&G.infl)||1;return (isFinite(v)&&v>0)?v:1;}
+function inflWage(){return Math.pow(inflIndex(),INFL_WAGE_POW);}
+function IN(x){return Math.round(x*inflIndex());}      // a cost or a revenue, in today's money
+function INW(x){return Math.round(x*inflWage());}      // a wage, in today's money
+function inflTick(){
+ const rate=clamp(INFL_BASE+rnd(-0.020,0.032),0.005,0.12);
+ G.inflRate=rate;
+ G.infl=inflIndex()*(1+rate);
+ (G.inflHist=G.inflHist||[]).push(+(G.infl).toFixed(4));
+ if(G.inflHist.length>60)G.inflHist.shift();
+}
+function jetCost(){return IN(JET_COST);}
+function jetMaintCost(){return IN(JET_MAINT);}
+function supporterCost(){return IN(SUPPORTER_COST);}
+function ticketMgrWage(){return IN(TICKET_MGR_WAGE);}
+function superScoutCost(){return IN(SUPER_SCOUT_COST);}
+function liaisonWage(){return IN(LIAISON_WAGE);}
+function matchBetCap(){return IN(MATCH_BET_CAP);}
+function inflPct(){return Math.round(((typeof G!=="undefined"&&G&&G.inflRate)||INFL_BASE)*1000)/10;}
+
 /* ---- Region name pools ---- */
 /* ===================== REGIONS · NAMES · COUNTRIES (v4) ===================== */
 const REGIONS=[
@@ -270,7 +301,7 @@ function coachInfo(){return COACH_TIERS[coachTier()];}
 function coachTraitInfo(){return G.coach?COACH_TRAITS[G.coach.trait]:null;}
 function coachWage(tier,age){
  // older coaches come cheaper: you are buying fewer years
- const base=[0,8000,18000,32000][tier];
+ const base=IN([0,8000,18000,32000][tier]);
  const ageF=clamp(1-(age-38)*0.012,0.62,1.12);
  return Math.max(3000,Math.round(base*ageF*rnd(0.9,1.15)/500)*500);
 }
@@ -321,7 +352,9 @@ function coachCompFee(c){return Math.max(50000,Math.round(c.wage*26/10000)*10000
 function coachSeverance(){
  // paying up the remaining contract: the rest of this season plus full seasons after
  if(!G.coach)return 0;
- if(G.coachRenewal)return 0;   // an expired deal costs nothing to walk away from
+ // An EXPIRED deal costs nothing to walk away from. A coach who is merely asking for a
+ // rise is still under contract, and paying him off still costs every week of it.
+ if(G.coachRenewal&&G.coachRenewal.kind!=="trophy")return 0;
  const weeksLeft=Math.max(0,SEASON_LEN-Math.min(G.matchday,SEASON_LEN))
    +Math.max(0,(G.coach.contract||1)-1)*SEASON_LEN;
  return weeksLeft*G.coach.wage;
@@ -370,6 +403,18 @@ function sackCoach(){
  releaseCoachToPool(G.coach);G.coach=null;delete G.coachRenewal;
  saveGame(true);render();
 }
+/* However much he has won, a coach is not paid more than his best player by a wide
+   margin. Without a ceiling a decade of clean sweeps compounds his wage past anything
+   the club could plausibly pay, which turns a good decision into an arithmetic joke. */
+function coachWageCeiling(){
+ const t=userTeamObj();if(!t)return Infinity;
+ let top=0;squadOf(t).forEach(p=>{if(p&&p.wage>top)top=p.wage;});
+ return Math.max(IN(60000),Math.round(top*1.5/500)*500);
+}
+function capCoachDemand(w){
+ const c=G.coach;if(!c)return w;
+ return Math.max(c.wage,Math.min(w,coachWageCeiling()));
+}
 function coachRenewalDemand(){
  // his deal has run out. Success makes him expensive, which is painfully realistic.
  const c=G.coach;if(!c)return;
@@ -379,18 +424,69 @@ function coachRenewalDemand(){
  else if(h.rank===1)mult+=0.2;
  if(G.cup&&G.cup.winner===G.userTeam)mult+=0.2;
  if(h.promo)mult+=0.15;
- G.coachRenewal={wage:Math.round(c.wage*mult/500)*500,years:ri(2,3)};
+ mult+=(G.inflRate||INFL_BASE);        // the cost of living moves for coaches too
+ G.coachRenewal={wage:capCoachDemand(Math.round(c.wage*mult/500)*500),years:ri(2,3),kind:"expiry"};
+}
+/* ======================= COACH RENEGOTIATION =======================
+   A coach who wins does not wait for his contract to run out. Every season he takes
+   something off you he comes back for a rise, and the bigger the trophy the bigger the
+   ask - a continental crown makes him the most wanted man in the game and he knows it.
+   Turning him down is allowed, and it costs nothing today. What it costs is later: a
+   coach refused twice starts listening to the phone calls, and the clubs above you are
+   always calling. Even a trophyless season produces a cost-of-living ask, because
+   everything else in this world gets dearer every year and his wage should too. */
+function coachTrophyDemand(){
+ const c=G.coach;if(!c||G.coachRenewal)return;
+ if((c.contract||0)<=0)return;            // an expiring deal is handled as a renewal
+ const h=G.history[G.history.length-1]||{};
+ const wonLeague=h.rank===1;
+ const wonRegional=!!(G.cup&&G.cup.winner===G.userTeam);
+ const wonConrad=!!(G.lastCont&&G.lastCont.season===G.season&&G.lastCont.winnerId===G.userTeam);
+ const wonPromo=!!h.promo;
+ const why=[];let mult=1;
+ if(wonConrad){mult+=0.45;why.push(CONT_CUP);}
+ if(wonLeague){mult+=0.28;why.push("the league");}
+ if(wonRegional){mult+=0.20;why.push(cupName());}
+ if(wonPromo&&!wonLeague){mult+=0.14;why.push("promotion");}
+ const cola=(G.inflRate||INFL_BASE);
+ if(!why.length){
+   // No silverware: he asks only for the cost of living, and only if he is any good.
+   if(c.tier<2||Math.random()<0.45)return;
+   mult+=cola*1.4;
+   G.coachRenewal={wage:capCoachDemand(Math.round(c.wage*mult/500)*500),years:Math.max(c.contract,2),
+     kind:"trophy",why:"the rising cost of everything else"};
+ }else{
+   mult+=cola;
+   // The very best know exactly what they are worth, and ask for it.
+   if(c.tier===3)mult+=0.10;
+   G.coachRenewal={wage:capCoachDemand(Math.round(c.wage*mult/500)*500),years:Math.max(c.contract,ri(2,3)),
+     kind:"trophy",why:why.join(" and ")};
+ }
+ if(G.coachRenewal.wage<=c.wage){delete G.coachRenewal;return;}   // the ceiling swallowed it
+ logAdd(`${c.name} wants his deal reopened after ${G.coachRenewal.why}. He is asking for ${money(G.coachRenewal.wage)}/wk.`);
 }
 function renewCoach(){
  const r=G.coachRenewal;if(!r||!G.coach)return;
  if(r.wage>=Math.round(G.coach.wage*1.3))awardBadge("contract_whisperer");
  G.coach.wage=r.wage;G.coach.contract=r.years;
+ delete G.coach.unsettled;                     // paid, and therefore settled
  logAdd(`${G.coach.name} signed a new ${r.years}-year deal at ${money(r.wage)}/wk.`);
  delete G.coachRenewal;
  toast(`${G.coach.name} stays on.`);saveGame(true);render();
 }
 function declineRenewal(){
  if(!G.coach)return;
+ const r=G.coachRenewal;
+ if(r&&r.kind==="trophy"){
+   // He is under contract. He stays, he honours it, and he starts taking calls.
+   G.coach.unsettled=(G.coach.unsettled||0)+1;
+   delete G.coachRenewal;
+   logAdd(G.coach.unsettled>=2
+     ? `${G.coach.name} was turned down again. He is openly unsettled and rivals know it.`
+     : `${G.coach.name} was turned down. He honours his contract, but he will not forget.`);
+   toast(`${G.coach.name} stays, unhappy.`);
+   saveGame(true);render();return;
+ }
  logAdd(`${G.coach.name} left the club as his contract expired.`);
  releaseCoachToPool(G.coach);G.coach=null;delete G.coachRenewal;
  saveGame(true);render();
@@ -456,7 +552,8 @@ function valueOf(p){
  let v=Math.pow(p.ovr/100,3)*42e6;
  if(p.age<24)v*=1.35;else if(p.age<30)v*=1.15;else if(p.age<34)v*=.75;else v*=.38;
  if(p.pot-p.ovr>10&&p.age<23)v*=1.35;
- return Math.max(40000,Math.round(v/10000)*10000);}
+ v*=inflIndex();                                 // the whole market reprices every season
+ return Math.max(IN(40000),Math.round(v/10000)*10000);}
 /* A famous player is paid for being famous, not only for his current rating. This is
    what lets the three archetypes coexist on one formula: the prodigy is paid before he
    has produced, the peak star is paid for what he is, and the thirty-four-year-old whose
@@ -468,8 +565,10 @@ function fameWageMult(p){
  return 1+2.6*Math.pow((f-FAME_MARQUEE)/(100-FAME_MARQUEE),1.2);   // up to 3.6x at fame 100
 }
 function wageOf(p){
- const base=Math.max(500,Math.round(valueOf(p)*.0006/100)*100);
- return Math.max(500,Math.round(base*fameWageMult(p)/100)*100);
+ // valueOf already carries base inflation; wages take the extra premium on top of it.
+ const prem=inflWage()/inflIndex();
+ const base=Math.max(INW(500),Math.round(valueOf(p)*.0006*prem/100)*100);
+ return Math.max(INW(500),Math.round(base*fameWageMult(p)/100)*100);
 }
 /* Highest wage among CONTRACTED players. Free agents are deliberately excluded: their
    own demand is priced off this number, so counting them would let each famous free
@@ -551,12 +650,13 @@ function placeReleasedYouth(p,fromId){
  return suitor;
 }
 function squadWage(t){return squadOf(t).reduce((s,p)=>s+p.wage,0);}
-function staffWage(){let s=0;for(const r in G.myStaff){const st=G.myStaff[r];if(st)s+=STAFF_WAGE[st.stars]}
- if(G.scoutTier)s+=SCOUT_TIERS[G.scoutTier].wage;
- if(G.superScout)s+=Math.round(SUPER_SCOUT_COST/SEASON_LEN); // £5M/yr over the season's matchdays
- if(G.ticketManager)s+=TICKET_MGR_WAGE;
- {const ut=T(G.userTeam);if(ut&&ut.supporters)s+=Math.round(SUPPORTER_COST/SEASON_LEN);}
- if(G.liaison)s+=LIAISON_WAGE;
+function staffWageOf(stars){return IN(STAFF_WAGE[stars]||0);}
+function staffWage(){let s=0;for(const r in G.myStaff){const st=G.myStaff[r];if(st)s+=staffWageOf(st.stars)}
+ if(G.scoutTier)s+=IN(SCOUT_TIERS[G.scoutTier].wage);
+ if(G.superScout)s+=Math.round(superScoutCost()/SEASON_LEN); // £5M/yr over the season's matchdays
+ if(G.ticketManager)s+=ticketMgrWage();
+ {const ut=T(G.userTeam);if(ut&&ut.supporters)s+=Math.round(supporterCost()/SEASON_LEN);}
+ if(G.liaison)s+=liaisonWage();
  if(G.coach)s+=G.coach.wage;
  return s;}
 function myStars(role){const s=G.myStaff&&G.myStaff[role];return s?s.stars:0;}
@@ -644,6 +744,7 @@ function genWorld(ownerName){
     ticketPrice:20,finance:null,log:[],history:[],cup:null,results:[],
     cups:{regional:[],continental:[],world:[],tippy:[]},wcYearsLeft:4,tippyYearsLeft:2,
     liaison:false,liaisonCycle:null,gbLog:[],badges:{},badgeStats:{},
+    infl:1,inflRate:INFL_BASE,inflHist:[1],rnd:{done:{},failed:{},active:[],offers:[]},
     matchBet:null,futuresBets:[],lastBootRace:{},betLog:[],saga:null,_clubIdx:clubIdx};
  rebuildIndex();rebuildTierTeams();
  G.players.forEach(p=>p.fame=fameSeed(p));   // the world starts with stars already in it
@@ -763,6 +864,12 @@ function hydrateLoadedG(){
  G.players.forEach(p=>{if(p.contract==null)p.contract=ri(2,5);p.gs=p.gs||0;p.gc=p.gc||0;p.as=p.as||0;p.ac=p.ac||0;p.susp=p.susp||0;p.wcWins=p.wcWins||0;p.wcApps=p.wcApps||0;p.tippyWins=p.tippyWins||0;p.tippyApps=p.tippyApps||0;p.gbWins=p.gbWins||0});
  // stardom: an existing career gets fame seeded from what the player has already done
  G.players.forEach(p=>{if(typeof p.fame!=="number"||isNaN(p.fame))p.fame=fameSeed(p)});
+ // inflation index: an older save simply starts its clock now
+ G.players.forEach(p=>{if(p.natDuty)delete p.natDuty;});
+ rndState();if(!G.rnd.offers.length&&!G.rnd.active.length)rndDrawOffers();
+ if(typeof G.infl!=="number"||!isFinite(G.infl)||G.infl<=0)G.infl=1;
+ if(typeof G.inflRate!=="number"||!isFinite(G.inflRate))G.inflRate=INFL_BASE;
+ if(!Array.isArray(G.inflHist))G.inflHist=[G.infl];
  // migrate keepers from the old shared six to dedicated keeper metrics,
  // preserving OVR: seed each new metric near the old rating, then recompute.
  G.players.forEach(p=>{
@@ -890,7 +997,35 @@ function doImport(){
 }
 
 /* ======================= MATCH ENGINE ======================= */
-function fit(list){return list.filter(p=>p.inj<=0&&(p.susp||0)<=0);}
+function fit(list){return list.filter(p=>p.inj<=0&&(p.susp||0)<=0&&!p.natDuty);}
+/* ======================= INTERNATIONAL DUTY =======================
+   Football does not pause for your season. Every round one man from every club in the
+   world is away with his country and cannot be picked, and it is not the reserve
+   right-back it happens to: call-ups skew hard toward the best player available, so the
+   pain lands on the men you actually need. The call-ups for the NEXT round are drawn as
+   soon as the current one finishes, which is what makes them plannable - you can see
+   who is missing before you set your side, and squad depth stops being decoration. */
+function clearNatDuty(){G.players.forEach(p=>{if(p.natDuty)delete p.natDuty;});}
+function assignNatDuty(){
+ if(!G.teams)return;
+ G.natDuty=[];
+ G.teams.forEach(t=>{
+   const pool=squadOf(t).filter(p=>p&&p.inj<=0&&(p.susp||0)<=0);
+   if(pool.length<13)return;                 // a club already down to the bones is spared
+   // weight by ability: internationals are internationals for a reason
+   let tot=0;const w=pool.map(p=>{const v=Math.pow(Math.max(1,p.ovr-40),2.2);tot+=v;return v;});
+   let r=Math.random()*tot,idx=0;
+   for(let i=0;i<w.length;i++){r-=w[i];if(r<=0){idx=i;break;}idx=i;}
+   const p=pool[idx];if(!p)return;
+   p.natDuty=1;
+   G.natDuty.push({club:t.id,pid:p.id});
+   if(t.id===G.userTeam){
+     p.natCaps=(p.natCaps||0)+1;
+     logAdd(`${p.name} has been called up by ${p.country||"his country"} and misses the next match.`);
+   }else{p.natCaps=(p.natCaps||0)+1;}
+ });
+}
+function userCallUps(){const t=userTeamObj();return t?squadOf(t).filter(p=>p&&p.natDuty):[];}
 function averageRival(){
  // a league-average opponent from your own division, used to judge shape and dials
  const t=userTeamObj();
@@ -1144,6 +1279,7 @@ function teamBoost(id,home){
  // team jet keeps them fresh on the road. 'home' is undefined for neutral estimates.
  if(home===true && hasSupporters(t)) b+=SUPPORTER_BOOST;
  if(home===false && jetActive(t)) b+=JET_BOOST;
+ if(id===G.userTeam && hasRnD("setpiece")) b+=0.9;   // the set piece lab, every week
  return b;
 }
 function applyResult(h,a,hg,ag){
@@ -1159,6 +1295,12 @@ function logAdd(text,amt){
 }
 function playMatchday(){
  // an unanswered contract demand expires when the season kicks off: he walks
+ if(G.coachRenewal&&G.coachRenewal.kind==="trophy"&&G.coach){
+   // He asked, you never answered. He is contracted, so he stays - and he remembers.
+   G.coach.unsettled=(G.coach.unsettled||0)+1;
+   logAdd(`${G.coach.name}'s request for a new deal went unanswered. He stays, unsettled.`);
+   delete G.coachRenewal;
+ }
  if(G.coachRenewal&&G.coach){
    logAdd(`${G.coach.name} walked away \u2014 his contract demand went unanswered.`);
    toast(`${G.coach.name} has left the club.`);
@@ -1167,8 +1309,10 @@ function playMatchday(){
  // heal one matchday of injuries before selection (suspensions are served this match, cleared after)
  // a Man manager's treatment room often shaves an extra day off
  const _mm=G.coach&&G.coach.trait==="manman";
+ const _bio=hasRnD("medical");
  G.players.forEach(p=>{if(p.inj>0){p.inj--;
-   if(_mm&&p.team===G.userTeam&&p.inj>0&&Math.random()<0.5)p.inj--;}});
+   if(_mm&&p.team===G.userTeam&&p.inj>0&&Math.random()<0.5)p.inj--;
+   else if(_bio&&p.team===G.userTeam&&p.inj>0&&Math.random()<0.35)p.inj--;}});
  // fully delegated: the coach sets the side himself before every kickoff.
  // Runs now that injuries have healed and before the fixture is read, so a
  // Tactician still prepares for this exact opponent.
@@ -1213,6 +1357,7 @@ function playMatchday(){
  maybeEvent();
  aiTransfers();
  if(ALL_CUP_MARKS.includes(G.matchday))playCupRound();
+ clearNatDuty();assignNatDuty();   // the next round's call-ups, visible before you pick
  checkBadges();
  saveGame(true);
 }
@@ -1245,6 +1390,11 @@ function effCapacity(t){
    Phase 1 only computes and displays fame. Wages, attendance and the contract saga
    read from it later. */
 const FAME_DECAY=0.86, FAME_MARQUEE=60, FAME_ICON=80;
+/* A boy who has never played a senior match is not a household name, however highly the
+   club rates him. Academy prospects can be talked about - the hype route still runs -
+   but they cannot be Marquee, and they certainly cannot be Icons. The ceiling lifts the
+   moment he is promoted into the senior squad and starts actually playing. */
+const FAME_ACADEMY_CEIL=FAME_MARQUEE-1;
 /* Fame is overwhelmingly an attacking currency. A keeper or centre-half can become a
    household name, but it takes far more than being highly rated. This matters here
    because keeper OVR skews high in this engine: keepers take 6 of the world's top 20
@@ -1273,6 +1423,7 @@ function fameSeed(p){
  if(p.age>=30)f*=1.15;                                // veterans have had time to become known
  f*=fameRole(p);
  f+=Math.min(12,(p.gbWins||0)*6)+Math.min(10,(p.gc||0)/25);
+ if(inAcademy(p))f=Math.min(f,FAME_ACADEMY_CEIL);
  return clamp(Math.round(f),0,100);
 }
 /* A career's worth of achievement sets a floor that decay cannot pull you below.
@@ -1429,30 +1580,41 @@ function sagaHousekeeping(){
 function fameTick(){
  const boots=new Set((G._bootWinners||[]).map(b=>b.id));
  const rank={};
- G.players.filter(p=>p.team!=null).sort((a,b)=>b.ovr-a.ovr).forEach((p,i)=>rank[p.id]=i+1);
+ G.players.filter(p=>p.team!=null&&!inAcademy(p)).sort((a,b)=>b.ovr-a.ovr).forEach((p,i)=>rank[p.id]=i+1);
  const cont=(G.cups&&G.cups.continental||[]).find(x=>x.season===G.season);
  // The one route to fame for a keeper: being, unmistakably and for years, the best
  // goalkeeper alive. Deliberately slow. A striker reaches Marquee on two good seasons;
  // a keeper has to own the top spot for most of a decade.
- const bestGk=G.players.filter(x=>x.team!=null&&x.pos==="GK").sort((x,y)=>y.ovr-x.ovr)[0];
+ const bestGk=G.players.filter(x=>x.team!=null&&!inAcademy(x)&&x.pos==="GK").sort((x,y)=>y.ovr-x.ovr)[0];
  G.players.forEach(p=>{
+   const acad=inAcademy(p);
+   const apps=p.as||0;
    let f=fameOf(p)*FAME_DECAY;
    f+=(p.gs||0)*0.62;                                  // output
    if(boots.has(p.id))f+=12;                           // Golden Boot
+   /* Club success is only YOUR fame if you were part of it. This used to be flat: every
+      name on the books took the full title and continental bonus, so a dynasty made
+      household names of its reserve keeper and of sixteen-year-olds who had never left
+      the academy. At +17 a season against 0.86 decay that compounds to a hundred, which
+      is why prospects were showing up as Icons. Credit now scales with the share of the
+      season a man actually played, and a fringe player gets almost none of it. */
    const t=(p.seasonClub!=null?T(p.seasonClub):null)||(p.team!=null?T(p.team):null);
-   if(t){
-     if((t.leagueTitleSeasons||[]).includes(G.season))f+=5;
-     if(cont&&cont.winner===t.name)f+=12;
+   if(t&&!acad&&apps>=4){
+     const share=clamp(apps/SEASON_LEN,0,1);
+     if((t.leagueTitleSeasons||[]).includes(G.season))f+=5*share;
+     if(cont&&cont.winner===t.name)f+=12*share;
    }
-   const r=rank[p.id];
+   const r=acad?0:rank[p.id];
    // Standing: being among the best alive is itself fame, and the very top of the
    // world is a different order of famous again. This is the Haaland route.
    if(r&&r<=10)f+=((11-r)*0.75+(r<=3?4:0))*fameRole(p);
-   if(p.age<=21&&effPot(p)>=90&&(p.as||0)>=6&&f<FAME_HYPE_CEIL)
+   if(!acad&&p.age<=21&&effPot(p)>=90&&apps>=6&&f<FAME_HYPE_CEIL)
      f=Math.min(FAME_HYPE_CEIL,f+16*fameRole(p));      // hype, capped short of Icon
-   if(p.age<=24&&p.ovr>=88)f+=5*fameRole(p);           // arrived early
+   if(!acad&&p.age<=24&&p.ovr>=88&&apps>=4)f+=5*fameRole(p);   // arrived early
    if(bestGk&&p.id===bestGk.id&&p.ovr>=90)f+=9;        // the undisputed best keeper alive
-   p.fame=clamp(Math.round(Math.max(f,fameFloor(p))),0,100);
+   f=Math.max(f,fameFloor(p));
+   if(acad)f=Math.min(f,FAME_ACADEMY_CEIL);
+   p.fame=clamp(Math.round(f),0,100);
  });
 }
 function bootRace(){
@@ -1508,7 +1670,7 @@ function attendanceFactors(t,oppId,cupStage){
  // so setting face value to the resale price now FILLS the ground instead of emptying
  // it \u2014 real demand (a hot secondary market) genuinely supports a higher gate.
  const pull=(.42+rep*.45)+f.boot+f.goat+f.prestige+f.form+f.cup;
- const clearing=clamp(35+clamp(pull-0.7,0,1.4)*200,30,450);
+ const clearing=clamp(IN(35)+clamp(pull-0.7,0,1.4)*IN(200),IN(30),IN(450));
  const baseFill=clamp(pull,.12,1);
  const over=Math.max(0,G.ticketPrice-clearing);
  f.base=baseFill;f.comfort=clearing;
@@ -1521,7 +1683,20 @@ const STADIUM_TIERS=[
  {addSeats:6000,cost:6000000,years:1,label:"Tier 1 expansion (+6k)"},
  {addSeats:10000,cost:14000000,years:1,label:"Tier 2 expansion (+10k)"},
  {addSeats:16000,cost:28000000,years:1,label:"Tier 3 expansion (+16k)"},
- {target:100000,cost:100000000,years:2,label:"Mega stadium (100k)"}];
+ {target:100000,cost:100000000,years:2,label:"Mega stadium (100k)"},
+ /* The last thing a club can build. Three seasons on a temporary ground, a price tag
+    that would buy a squad twice over, and a running cost that never goes away - but a
+    quarter of a million seats is a gate no rival can approach. */
+ {target:250000,cost:450000000,years:3,label:"The Colossus (250k)"}];
+/* Grounds cost money to run whether or not anyone is in them, and the bigger the
+   ground the bigger the bill. This is what stops a mega stadium from being free money
+   forever, and it is why the biggest builds are a genuine gamble on staying good. */
+function stadiumUpkeep(t){return t?IN(Math.round(t.capacity*2.2)):0;}
+/* Construction is priced in today's money like everything else. */
+function stadiumPlan(level){
+ const p=STADIUM_TIERS[level];if(!p)return null;
+ return {addSeats:p.addSeats,target:p.target,years:p.years,label:p.label,cost:IN(p.cost)};
+}
 function nextHomeFixture(){
  // the user's next home occasion: league game or home cup tie, whichever is nearer
  if(G.matchday>=SEASON_LEN)return null;
@@ -1561,14 +1736,14 @@ function aiFacilitiesTick(){
  G.teams.forEach(t=>{
    if(t.id===G.userTeam)return;
    // upkeep for the coming season (auto-pay if affordable, else benefit lapses)
-   if(t.supporters){if(t.budget>=SUPPORTER_COST)t.budget-=SUPPORTER_COST;else t.supporters=false;}
-   if(t.jet){if(t.budget>=JET_MAINT){t.budget-=JET_MAINT;t.jetMaint="paid";}else t.jetMaint="rejected";}
+   if(t.supporters){if(t.budget>=supporterCost())t.budget-=supporterCost();else t.supporters=false;}
+   if(t.jet){if(t.budget>=jetMaintCost()){t.budget-=jetMaintCost();t.jetMaint="paid";}else t.jetMaint="rejected";}
    if((t.facility||0)>0){const m=facilityMaintCost(t.facility);
      if(t.budget>=m){t.budget-=m;t.facilityMaint="paid";}else t.facilityMaint="rejected";}
    // occasional investment, buffer-protected and weighted by prestige
    const pd=(t.prestige||0)/100;
-   if(!t.supporters&&t.budget>=SUPPORTER_COST*10&&Math.random()<0.05+pd*0.15)t.supporters=true;
-   if(!t.jet&&t.budget>=JET_COST*1.4&&Math.random()<0.03+pd*0.10){t.budget-=JET_COST;t.jet=true;t.jetMaint="paid";}
+   if(!t.supporters&&t.budget>=supporterCost()*10&&Math.random()<0.05+pd*0.15)t.supporters=true;
+   if(!t.jet&&t.budget>=jetCost()*1.4&&Math.random()<0.03+pd*0.10){t.budget-=jetCost();t.jet=true;t.jetMaint="paid";}
    if((t.facility||0)<3&&(t.facilityBoughtSeason||0)!==G.season){
      const nx=(t.facility||0)+1,cost=facilityCost(nx);
      if(t.budget>=cost*1.4&&Math.random()<0.03+pd*0.08){
@@ -1704,7 +1879,7 @@ function userLiaisonTick(){
 }
 function hireLiaison(){G.liaison=true;
  if(!userTeamObj().sponsor&&!G.liaisonCycle)startLiaisonEval();
- logAdd(`Hired a shoe brand liaison (${money(LIAISON_WAGE)}/wk) \u2014 they begin a season-long evaluation.`);saveGame(true);render();}
+ logAdd(`Hired a shoe brand liaison (${money(liaisonWage())}/wk) \u2014 they begin a season-long evaluation.`);saveGame(true);render();}
 function fireLiaison(){G.liaison=false;G.liaisonCycle=null;logAdd("Released the shoe brand liaison.");saveGame(true);render();}
 function renewShoeDeal(){
  const t=userTeamObj();if(!t||!t.sponsor||!t.sponsor.renewDue)return;
@@ -1849,6 +2024,12 @@ const BADGES=[
  /* ---- Empire FC 2: academy, squad management and the transfer market ---- */
  {id:"first_promotion",name:"Blooded",desc:"Promote a prospect from your academy into the senior squad"},
  {id:"academy_full",name:"Production Line",desc:"Fill your academy to all 20 places"},
+ /* ---- Innovation Lab ---- */
+ {id:"first_moonshot",name:"Skunkworks",desc:"Commission your first research project"},
+ {id:"moonshot_landed",name:"It Worked",desc:"Land a research project"},
+ {id:"moonshot_failed",name:"Written Off",desc:"Watch a research project come to nothing"},
+ {id:"research_house",name:"Research House",desc:"Land 3 research projects"},
+ {id:"the_future",name:"The Future",desc:"Land 6 research projects"},
  {id:"academy_gem",name:"Diamond in the Rough",desc:"Have an academy prospect with 90+ potential on your books"},
  {id:"academy_star",name:"Made Here",desc:"Develop an academy graduate to 85+ OVR at your club"},
  {id:"homegrown_xi",name:"Class of the Academy",desc:"Field a starting XI with 5+ academy graduates"},
@@ -1988,7 +2169,7 @@ function placeMatchBet(gf,ga,stake){
  const xg=matchXG();if(!xg)return toast("No upcoming match to bet on.");
  stake=Math.round(stake);
  if(!(stake>0))return toast("Enter a stake first.");
- if(stake>MATCH_BET_CAP)return toast(`Match bets are capped at ${money(MATCH_BET_CAP)}.`);
+ if(stake>matchBetCap())return toast(`Match bets are capped at ${money(matchBetCap())}.`);
  if(t.budget<stake)return toast("You can't stake more than your budget.");
  const mult=Math.round(scoreMultFrom(xg,gf,ga)*100)/100;
  const oppName=T(xg.nx.opp)?T(xg.nx.opp).name:"?";
@@ -2098,7 +2279,7 @@ const DISCONTENT_STAR_APPS=7;    // roughly half a season of matches
 const FORCED_SALE_DISCOUNT=0.55; // he is sold knowing he wants out
 function unhappyList(t){return((t&&t.unhappy)||[]).map(P).filter(Boolean);}
 function isUnhappy(p){const t=p&&p.team!=null?T(p.team):null;return !!(t&&(t.unhappy||[]).includes(p.id));}
-function forcedFee(p){return Math.max(250000,Math.round(transferFee(p)*FORCED_SALE_DISCOUNT/100000)*100000);}
+function forcedFee(p){return Math.max(IN(250000),Math.round(transferFee(p)*FORCED_SALE_DISCOUNT/100000)*100000);}
 /* Runs at season end, before appearances reset. Flags newly unhappy players and lets
    anyone already unhappy leave for free if he was ignored for another whole season. */
 function discontentTick(){
@@ -2238,7 +2419,8 @@ function wageDemand(p){
  // rival interest: how many clubs could plausibly afford and want him
  mult+=clamp(rivalInterest(p)*0.06,0,0.45);
  if(p.age>=33)mult*=0.75;                          // a veteran has less leverage
- return Math.max(500,Math.round(base*mult/100)*100);
+ if(t&&t.id===G.userTeam&&hasRnD("contracts"))mult*=0.85;   // you know what he is worth
+ return Math.max(INW(500),Math.round(base*mult/100)*100);
 }
 function rivalInterest(p){
  const fee=transferFee(p);
@@ -2306,8 +2488,8 @@ function expiringWalkouts(){
 function aiStadiumTick(){
  G.teams.forEach(t=>{
    if(t.id===G.userTeam||t.building>0||(t.stadiumLevel||0)>=STADIUM_TIERS.length)return;
-   const plan=STADIUM_TIERS[t.stadiumLevel||0];
-   if(t.budget<plan.cost*1.4)return;                 // keep a 40% buffer after building
+   const plan=stadiumPlan(t.stadiumLevel||0);
+   if(!plan||t.budget<plan.cost*1.4)return;                 // keep a 40% buffer after building
    const drive=0.04+(t.prestige||0)/500+(t.tier===0?0.10:t.tier===1?0.04:0);
    if(Math.random()<drive){
      t.budget-=plan.cost;t.building=plan.years||1;
@@ -2320,7 +2502,8 @@ function startStadiumBuild(){
  const t=userTeamObj();
  if(t.building>0)return toast("Construction is already under way.");
  if(t.stadiumLevel>=STADIUM_TIERS.length)return toast("Your stadium is already at maximum size.");
- const plan=STADIUM_TIERS[t.stadiumLevel];
+ const plan=stadiumPlan(t.stadiumLevel);
+ if(!plan)return toast("Your stadium is already at maximum size.");
  if(t.budget<plan.cost)return toast(`Need ${money(plan.cost)} to begin.`);
  t.budget-=plan.cost;t.building=plan.years||1;
  t.pendingSeats=plan.target?Math.max(0,plan.target-t.capacity):plan.addSeats;
@@ -2331,17 +2514,17 @@ function startStadiumBuild(){
 }
 /* ---- Office asset actions (user) ---- */
 function hireSupporters(){const t=userTeamObj();if(!t)return;t.supporters=true;
- logAdd(`Hired a supporters\u2019 club coordinator (${money(SUPPORTER_COST)}/yr).`);saveGame(true);render();}
+ logAdd(`Hired a supporters\u2019 club coordinator (${money(supporterCost())}/yr).`);saveGame(true);render();}
 function dismissSupporters(){const t=userTeamObj();if(!t)return;t.supporters=false;
  logAdd("Released the supporters\u2019 club coordinator.");saveGame(true);render();}
 function buyJet(){const t=userTeamObj();if(!t)return;
  if(t.jet)return toast("You already own a team jet.");
- if(t.budget<JET_COST)return toast(`Need ${money(JET_COST)} to buy the jet.`);
- t.budget-=JET_COST;t.jet=true;t.jetMaint="paid";           // first year's boost included
- logAdd(`Bought a team jet for ${money(JET_COST)}.`,-JET_COST);saveGame(true);render();}
+ if(t.budget<jetCost())return toast(`Need ${money(jetCost())} to buy the jet.`);
+ t.budget-=jetCost();t.jet=true;t.jetMaint="paid";           // first year's boost included
+ logAdd(`Bought a team jet for ${money(jetCost())}.`,-jetCost());saveGame(true);render();}
 function payJetMaint(){const t=userTeamObj();if(!t||!t.jet)return;
- if(t.budget<JET_MAINT)return toast(`Need ${money(JET_MAINT)} for jet upkeep.`);
- t.budget-=JET_MAINT;t.jetMaint="paid";logAdd("Paid team jet upkeep.",-JET_MAINT);saveGame(true);render();}
+ if(t.budget<jetMaintCost())return toast(`Need ${money(jetMaintCost())} for jet upkeep.`);
+ t.budget-=jetMaintCost();t.jetMaint="paid";logAdd("Paid team jet upkeep.",-jetMaintCost());saveGame(true);render();}
 function declineJetMaint(){const t=userTeamObj();if(!t)return;t.jetMaint="rejected";
  logAdd("Declined team jet upkeep \u2014 no away boost this season.");saveGame(true);render();}
 function buyFacility(){const t=userTeamObj();if(!t)return;
@@ -2358,22 +2541,24 @@ function payFacilityMaint(){const t=userTeamObj();if(!t||(t.facility||0)<1)retur
 function declineFacilityMaint(){const t=userTeamObj();if(!t)return;t.facilityMaint="rejected";
  logAdd("Declined training facility upkeep \u2014 no development boost this season.");saveGame(true);render();}
 function sponsorWeekly(t){
- const base=[90000,40000,18000][t.tier];
- return Math.round(base*(1+repOf(t))*(1+.1*myStars("commercial")));}
+ const base=IN([90000,40000,18000][t.tier]);
+ const rd=(t.id===G.userTeam&&hasRnD("sponsor"))?1.25:1;
+ return Math.round(base*(1+repOf(t))*(1+.1*myStars("commercial"))*rd);}
 function merchWeekly(t){
  const sq=squadOf(t);
  const avg=sq.reduce((s,p)=>s+p.ovr,0)/sq.length;
  const stars=sq.filter(p=>p.ovr>=80).length;
- return Math.round((avg*150+stars*9000)*(1+.1*myStars("commercial")));}
+ const rd=(t.id===G.userTeam&&hasRnD("merch"))?1.30:1;
+ return Math.round(IN(avg*150+stars*9000)*(1+.1*myStars("commercial"))*rd);}
 function financeTick(home,oppId){
  const t=T(G.userTeam);
  if(home&&G.ticketManager)G.ticketPrice=optimalTicketPrice(t,oppId);
  const att=home?attendance(t,oppId):0;
- const gate=att*G.ticketPrice;
+ const gate=Math.round(att*G.ticketPrice*(hasRnD("pricing")?1.15:1));
  if(home){if(gate>=500000)awardBadge("box_office");if(att>=effCapacity(t))awardBadge("sold_out");}
  const spon=sponsorWeekly(t),merch=merchWeekly(t);
- const pw=squadWage(t),sw=staffWage();
- const net=gate+spon+merch-pw-sw;
+ const pw=squadWage(t),sw=staffWage(),up=stadiumUpkeep(t);
+ const net=gate+spon+merch-pw-sw-up;
  const wasOk=t.budget>=0;
  t.budget+=net;
  if(t.budget<0){G.badgeStats=G.badgeStats||{};G.badgeStats.wentRedThisSeason=true;}
@@ -2386,7 +2571,7 @@ function financeTick(home,oppId){
    if(G.redWeeks>0)logAdd("The books are balanced again. The transfer embargo is lifted.");
    G.redWeeks=0;
  }
- G.finance={home,att,gate,spon,merch,pw,sw,net};
+ G.finance={home,att,gate,spon,merch,pw,sw,up,net};
 }
 function inTheRed(){return userTeamObj().budget<0;}
 /* Position mix for fresh intake. Matches the world-generation pool (roughly 10% GK,
@@ -2559,7 +2744,7 @@ function aiFinanceTick(){
  G.teams.forEach(t=>{
    if(t.id===G.userTeam)return;
    const rep=repOf(t);
-   const income=Math.round([70000,32000,15000][t.tier]*(1+rep));
+   const income=Math.round(IN([70000,32000,15000][t.tier])*(1+rep));
    const wages=squadWage(t);
    t.budget+=income-wages;
    if(t.budget<0&&t.squad.length>SQUAD_MIN){
@@ -2578,7 +2763,9 @@ function maybeInjury(){
  if(Math.random()<Math.max(.03,chance)){
    const healthy=fit(squadOf(t));if(!healthy.length)return;
    const p=pick(healthy);
-   let dur=ri(2,5)-Math.floor(myStars("physio")/2);dur=Math.max(1,dur);
+   let dur=ri(2,5)-Math.floor(myStars("physio")/2);
+   if(hasRnD("medical"))dur=Math.round(dur*0.66);      // load management
+   dur=Math.max(1,dur);
    p.inj=dur;
    logAdd(`${p.name} injured, out ${dur} matchday${dur>1?'s':''}.`);
    toast(`Injury: ${p.name} out ${dur} matchday${dur>1?'s':''}.`);
@@ -2601,9 +2788,31 @@ function maybeEvent(){
  if(wageBill>[120000,60000,30000][t.tier])
    deck.push(()=>{const a=-Math.round(t.budget*.03);t.budget+=a;
      logAdd("New league legislation: a levy on high wage bills.",a);});
- deck.push(()=>{const sq=squadOf(t).sort((a,b)=>b.value-a.value);const s=sq[0];
-   const bump=Math.round(s.wage*.3);s.wage+=bump;
-   logAdd(`${s.name} demanded and won a raise of ${money(bump)}/wk.`);});
+ /* A player under contract cannot simply hold you up for more money mid-season: that
+    is the entire point of a contract, and the old version of this event ignored it. Only
+    a man in the FINAL YEAR of his deal has any leverage at all, and even then what he
+    gets is an early renewal - a raise in exchange for extra years - rather than a free
+    rise on the same terms. Anyone with time left on his deal is simply told no, and
+    remembers it. */
+ deck.push(()=>{
+   const lever=squadOf(t).filter(p=>p&&(p.contract||0)<=1&&!p.demand&&p.runningDown==null)
+     .sort((a,b)=>b.value-a.value)[0];
+   if(lever){
+     const bump=Math.max(INW(500),Math.round(lever.wage*rnd(.18,.32)/100)*100);
+     const yrs=newContractYears();
+     lever.wage+=bump;lever.contract=yrs;
+     logAdd(`${lever.name} was into the last year of his deal and used it. He re-signed for ${yrs} more seasons on ${money(lever.wage)}/wk (+${money(bump)}).`);
+     return;
+   }
+   const held=squadOf(t).filter(p=>p&&(p.contract||0)>1).sort((a,b)=>b.value-a.value)[0];
+   if(!held)return;
+   logAdd(`${held.name}'s agent pushed for a new deal. He has ${held.contract} seasons left to run and the club held firm.`);
+   // Turning him down is not free. A big name told no is a candidate to agitate later.
+   if(held.ovr>=DISCONTENT_STAR_OVR&&Math.random()<0.35&&!isUnhappy(held)&&t.squad.length>SQUAD_MIN){
+     (t.unhappy=t.unhappy||[]).push(held.id);held.unhappySince=G.season;
+     logAdd(`${held.name} did not take it well. He has asked to leave.`);
+   }
+ });
  deck.push(()=>{const a=ri(40,90)*1000;t.budget+=a;
    logAdd("The board released funds after a favorable audit.",a);});
  deck.push(()=>{const a=-ri(25,90)*1000;t.budget+=a;
@@ -2835,7 +3044,7 @@ function playCupRound(){
        if(h===G.userTeam||a===G.userTeam){
          const home=h===G.userTeam,gf=home?hg:ag,ga=home?ag:hg;
          cupUserRecord(CUP_GROUP_MARKS[r],gf,ga);
-         let prize=gf>ga?GROUP_WIN:gf===ga?GROUP_DRAW:0;
+         let prize=IN(gf>ga?GROUP_WIN:gf===ga?GROUP_DRAW:0);
          if(prize){T(G.userTeam).budget+=prize;}
          logAdd(`${CUP} ${grTag(r)}: ${T(h).name} ${hg}\u2013${ag} ${T(a).name}.`,prize||0);
          if(!QUIET)toast(`${CUP} ${grTag(r)}: ${T(h).name} ${hg}\u2013${ag} ${T(a).name}${prize?` (+${money(prize)})`:""}`);
@@ -2860,7 +3069,7 @@ function playCupRound(){
        const isFinal=c.koStage===KO_NAMES.length-1;   // last round is the final
        if(isFinal)awardBadge("cup_runners");
        {const _opp=home?a:h;if(wnr===G.userTeam&&T(_opp)&&(T(_opp).tier||0)<(T(G.userTeam).tier||0))awardBadge("giant_killers");}
-       if(wnr===G.userTeam){const prize=KO_PRIZE[c.koStage];T(G.userTeam).budget+=prize;
+       if(wnr===G.userTeam){const prize=IN(KO_PRIZE[c.koStage]);T(G.userTeam).budget+=prize;
          logAdd(`${CUP}: ${isFinal?"CHAMPIONS \u2014 the cup is yours!":"won the "+KO_NAMES[c.koStage]+"."}`,prize);
          if(!QUIET)toast(`${CUP} ${KO_NAMES[c.koStage]}: ${line} \u2014 ${isFinal?"you win the cup!":"you advance!"} +${money(prize)}`);}
        else{c.userOut=true;logAdd(`${CUP}: ${isFinal?"beaten in the final \u2014 runner-up.":"knocked out in the "+KO_NAMES[c.koStage]+"."}`);
@@ -2899,10 +3108,10 @@ function endSeason(){
  const _myRank=RT[ureg][_playedTier].indexOf(T(G.userTeam))+1;
  G._myRank=_myRank;G._playedTier=_playedTier;
  const promoted=new Set(),relegated=new Set();
- const base=[8e6,3e6,1.2e6];
+ const base=[IN(8e6),IN(3e6),IN(1.2e6)];
  // income for every club, TV + placement
  REGIONS.forEach(r=>RT[r.key].forEach((tbl,tier)=>tbl.forEach((t,rank)=>{
-   const tv=base[tier]+(PER_TIER-rank)*220000;
+   const tv=base[tier]+(PER_TIER-rank)*IN(220000);
    if(t.id===G.userTeam){t.budget+=tv;logAdd("Season TV and prize money received.",tv);}
    // AI wages are already deducted every matchday in aiFinanceTick, so the
    // season-end payment is TV and prize money only. Charging both meant AI
@@ -3080,6 +3289,8 @@ function endSeason(){
  G.tippyYearsLeft=(G.tippyYearsLeft==null?2:G.tippyYearsLeft)-1;
  if(G.tippyYearsLeft<=0){runTippyCup();G.tippyYearsLeft=4;}
  settleFutures();
+ inflTick();         // the world reprices BEFORE next season's demands are calculated
+ rndTick();          // research settles: a rule changes, or the money is simply gone
  expiringWalkouts();   // anyone refused terms last window leaves now
  discontentTick();   // must run before ageAndRenew resets season appearances
  sagaLeak();         // the press files another report on the running saga
@@ -3111,6 +3322,7 @@ function endSeason(){
      G.staffPool.push(newStaff(G.nextPid+++100000,role));
  }
  initCup();
+ clearNatDuty();assignNatDuty();
  saveGame(true);
 }
 function stockClub(t){
@@ -3313,7 +3525,7 @@ function contPlayRound(st){
    st.lastRound.lines.push({line,user:h===G.userTeam||a===G.userTeam,won:wnr===G.userTeam});
    if(h===G.userTeam||a===G.userTeam){
      if(rn==="Semifinal")awardBadge("conrad_contender");
-     if(wnr===G.userTeam){const pr=CONT_PRIZE[Math.min(st.round,3)];T(G.userTeam).budget+=pr;
+     if(wnr===G.userTeam){const pr=IN(CONT_PRIZE[Math.min(st.round,3)]);T(G.userTeam).budget+=pr;
        logAdd(`${CONT_CUP}: won a ${rn}.`,pr);}
      else{st.userOut=true;logAdd(`${CONT_CUP}: knocked out in the ${rn}.`);}
    }
@@ -3496,6 +3708,9 @@ function ageAndRenew(){
    // a Youth developer head coach compounds it: this season for the next three
    if(G.coach&&G.coach.trait==="youth"&&p.team===G.userTeam&&p.age<23)
      _at.forEach(a=>p[a]=clamp(p[a]+ri(0,2),18,99));
+   // the neuro suite: your under-23s learn faster than anyone else's, permanently
+   if(hasRnD("neuro")&&p.team===G.userTeam&&p.age<23)
+     _at.forEach(a=>p[a]=clamp(p[a]+ri(0,2),18,99));
    // youth academy clubs develop their own prospects faster
    const _c=p.team!=null?T(p.team):null;
    if(_c&&_c.trait==="youth"&&_c.id!==G.userTeam&&p.age<23)
@@ -3593,6 +3808,120 @@ function userReleaseYouth(p){
               :`${p.name} released from the academy.`);
  saveGame(true);render();
 }
+/* ======================= THE INNOVATION LAB =======================
+   A president with more money than problems is a president with nothing to do, and the
+   late game of a management sim always ends the same way: a bank balance that no longer
+   means anything. This is the answer. Every close season the club is offered a short
+   menu of research projects - real money, real years, and a real chance the whole thing
+   comes to nothing. They are not upgrades you buy. They are bets you place.
+
+   What makes them worth the risk is that a project which lands does not pay a dividend,
+   it changes a RULE. Your injuries heal faster forever. Your academy screens for ceiling
+   instead of ability. You can read the potential of every player alive without paying a
+   scout. The money is gone either way; what you are buying is a permanent structural
+   edge over ninety clubs who do not have one.
+
+   Failure is the point. A guaranteed purchase is a shop, not a gamble, and a shop does
+   not make a currency mean anything. Each failed attempt raises the price of trying that
+   project again by a quarter, so chasing a moonshot you keep missing gets genuinely
+   expensive - which is exactly the shape of real research spending. */
+const RND_PROJECTS={
+ medical:{name:"Biometric Load Management",cost:40e6,years:1,chance:0.55,
+  desc:"Wearables on every player and a workload model that flags a breakdown before it happens.",
+  effect:"Injuries are roughly a third shorter, and your treatment room finds an extra day here and there."},
+ pricing:{name:"Dynamic Pricing Engine",cost:35e6,years:1,chance:0.60,
+  desc:"Price every seat against live demand instead of setting one number for the season.",
+  effect:"Gate receipts rise 15% at every home fixture, forever."},
+ setpiece:{name:"Set Piece Laboratory",cost:45e6,years:1,chance:0.35,
+  desc:"A dedicated analysis unit and a training pitch that does nothing else all week.",
+  effect:"A permanent edge in every match your side plays."},
+ scouting:{name:"Predictive Scouting Model",cost:60e6,years:1,chance:0.45,
+  desc:"A model that reads a player's ceiling out of match data rather than a scout's eye.",
+  effect:"You see the true potential of every player in the world, at any club, without ever paying to scout again."},
+ contracts:{name:"Contract Valuation Model",cost:50e6,years:2,chance:0.42,
+  desc:"Prices a player's next deal more accurately than his agent can.",
+  effect:"Wage demands from your own players fall 15%."},
+ sponsor:{name:"Fan Data Exchange",cost:65e6,years:2,chance:0.45,
+  desc:"Turns a supporter base into an audience that sponsors bid against each other for.",
+  effect:"Sponsorship income rises 25%."},
+ merch:{name:"Global Merchandise Platform",cost:55e6,years:2,chance:0.50,
+  desc:"Direct-to-fan distribution in every market your club plays in.",
+  effect:"Merchandise income rises 30%."},
+ dna:{name:"Genomic Talent Screening",cost:70e6,years:2,chance:0.40,
+  desc:"Screen every intake for ceiling rather than for what a sixteen-year-old can already do.",
+  effect:"Academy intake arrives with materially higher potential, every season, forever."},
+ neuro:{name:"Neuro-Cognitive Training Suite",cost:90e6,years:2,chance:0.38,
+  desc:"Decision-making drills in simulation, run against the situations your side actually faces.",
+  effect:"Every under-23 on your books develops faster than anyone else's."},
+ negotiation:{name:"Transfer Market Analytics",cost:80e6,years:2,chance:0.40,
+  desc:"Models a selling club's real reserve price instead of believing its asking price.",
+  effect:"Every transfer fee you pay falls 12%."}
+};
+const RND_OFFER_COUNT=3;
+function rndState(){
+ if(!G.rnd)G.rnd={done:{},failed:{},active:[],offers:[]};
+ if(!G.rnd.done)G.rnd.done={};
+ if(!G.rnd.failed)G.rnd.failed={};
+ if(!Array.isArray(G.rnd.active))G.rnd.active=[];
+ if(!Array.isArray(G.rnd.offers))G.rnd.offers=[];
+ return G.rnd;
+}
+function hasRnD(key){const r=G&&G.rnd;return !!(r&&r.done&&r.done[key]);}
+function rndActive(key){return rndState().active.some(a=>a.key===key);}
+/* Each failure makes the next attempt at that project a quarter dearer. */
+function rndCost(key){
+ const p=RND_PROJECTS[key];if(!p)return 0;
+ const fails=(rndState().failed[key]||0);
+ return IN(Math.round(p.cost*Math.pow(1.25,fails)));
+}
+function rndDrawOffers(){
+ const r=rndState();
+ const pool=Object.keys(RND_PROJECTS).filter(k=>!r.done[k]&&!rndActive(k));
+ r.offers=shuffle(pool.slice()).slice(0,RND_OFFER_COUNT);
+}
+function rndFund(key){
+ const t=userTeamObj();if(!t)return;
+ if(!inWindow())return toast("Projects can only be commissioned in the pre-season window.");
+ const p=RND_PROJECTS[key];if(!p)return;
+ const r=rndState();
+ if(r.done[key])return toast("That project has already landed.");
+ if(rndActive(key))return toast("That project is already running.");
+ const cost=rndCost(key);
+ if(t.budget<cost)return toast(`Need ${money(cost)} to commission this.`);
+ if(!confirm(`Commission ${p.name} for ${money(cost)}? It runs for ${p.years} season${p.years===1?"":"s"} and has roughly a ${Math.round(p.chance*100)}% chance of working. If it fails the money is gone.`))return;
+ t.budget-=cost;
+ r.active.push({key,seasonsLeft:p.years,chance:p.chance,cost,started:G.season});
+ r.offers=r.offers.filter(k=>k!==key);
+ logAdd(`Commissioned ${p.name} \u2014 ${money(cost)} committed over ${p.years} season${p.years===1?"":"s"}.`,-cost);
+ awardBadge("first_moonshot");
+ toast(`${p.name} is under way.`);
+ saveGame(true);render();
+}
+/* Resolved once a season, at the same time as everything else that settles. */
+function rndTick(){
+ const r=rndState();
+ const still=[];
+ r.active.forEach(a=>{
+   a.seasonsLeft--;
+   if(a.seasonsLeft>0){still.push(a);return;}
+   const p=RND_PROJECTS[a.key];if(!p)return;
+   if(Math.random()<a.chance){
+     r.done[a.key]=G.season;
+     logAdd(`${p.name} WORKED. ${p.effect}`);
+     G.news&&G.news.unshift({season:G.season,text:`${userTeamObj().name} unveil ${p.name}, the first of its kind in the game.`});
+     const won=Object.keys(r.done).length;
+     awardBadge("moonshot_landed");
+     if(won>=3)awardBadge("research_house");
+     if(won>=6)awardBadge("the_future");
+   }else{
+     r.failed[a.key]=(r.failed[a.key]||0)+1;
+     logAdd(`${p.name} came to nothing. ${money(a.cost)} written off.`);
+     awardBadge("moonshot_failed");
+   }
+ });
+ r.active=still;
+ rndDrawOffers();
+}
 function academyTick(){
  G.teams.forEach(t=>{
    if(!t.academy)t.academy=[];
@@ -3620,6 +3949,8 @@ function academyTick(){
      if(academyFull(t))break;
      const pos=pick(INTAKE_POS);
      const kid=newPlayer(G.nextPid++,pos,16,t.region);
+     // genomic screening: your intake is selected for ceiling, not for what he can do now
+     if(t.id===G.userTeam&&hasRnD("dna")){kid.pot=clamp(kid.pot+ri(6,13),20,99);setOvr(kid);kid.value=valueOf(kid);}
      joinClub(kid,t.id);kid.team=t.id;t.academy.push(kid.id);G.players.push(kid);
    }
  });
@@ -3655,7 +3986,8 @@ function coachSeasonTick(){
    if(c.tier>=2){
      const suitors=G.teams.filter(x=>x.id!==G.userTeam
        &&(x.prestige||0)>=(t.prestige||0)+12&&(x.prestige||0)>=c.prestigeReq);
-     const chance=0.08+(c.tier===3?0.06:0)+(h.rank===1?0.05:0);
+     // A coach you refused is a coach with his phone on. Each refusal doubles down.
+     const chance=0.08+(c.tier===3?0.06:0)+(h.rank===1?0.05:0)+(c.unsettled||0)*0.14;
      if(suitors.length&&Math.random()<chance){
        const s=suitors.sort((a,b)=>(b.prestige||0)-(a.prestige||0))[0];
        const fee=coachCompFee(c);
@@ -3670,6 +4002,7 @@ function coachSeasonTick(){
  if(G.coach){
    G.coach.contract=(G.coach.contract||1)-1;
    if(G.coach.contract<=0)coachRenewalDemand();
+   else coachTrophyDemand();      // still under contract, but he has earned a rise
  }
  // ---- the market ----
  G.coachPool.forEach(c=>c.age++);
@@ -3707,7 +4040,7 @@ function ensureXI(){
 }
 function userStartXI(){
  ensureXI();
- let xi=G.xi.map(P).filter(p=>p&&p.inj<=0&&(p.susp||0)<=0);
+ let xi=G.xi.map(P).filter(p=>p&&p.inj<=0&&(p.susp||0)<=0&&!p.natDuty);
  if(xi.length<11){const used=new Set(xi.map(p=>p.id));
    fit(squadOf(userTeamObj())).filter(p=>!used.has(p.id)).sort((a,b)=>b.ovr-a.ovr)
      .forEach(p=>{if(xi.length<11)xi.push(p)});}
@@ -3721,10 +4054,11 @@ function userStartXI(){
 function inWindow(){return G.matchday===0&&G.window&&G.window.day<=3;}
 function scoutInfo(){return SCOUT_TIERS[G.scoutTier||"none"];}
 function isScouted(id){return !!(G.scouted&&G.scouted[id]);}
-function scoutCost(){return scoutInfo().cost;}
+function scoutCost(){return IN(scoutInfo().cost);}
 function canSeePot(teamId){
  if(teamId==null)return false;
  if(teamId===G.userTeam)return true;
+ if(hasRnD("scouting"))return true;      // the model reads every player in the world
  return isScouted(teamId)&&scoutInfo().pot;
 }
 function buyScout(teamId){
@@ -3739,7 +4073,7 @@ function buyScout(teamId){
 function transferFee(p){
  // Headline is OVR x £1M, but the fee shifts with age and potential so a
  // young, high-ceiling player costs well above an aging one at the same OVR.
- const base=p.ovr*XFER_PER_OVR;
+ const base=p.ovr*XFER_PER_OVR*inflIndex();
  let mult=1;
  if(p.age<=21)mult=1.30; else if(p.age<=25)mult=1.12; else if(p.age<=29)mult=1.0;
  else if(p.age<=32)mult=0.78; else if(p.age<=35)mult=0.55; else mult=0.38;
@@ -3751,11 +4085,11 @@ function transferFee(p){
    if(seller.trait==="hoarder")mult*=1.65;      // will not be moved cheaply
    if(seller.trait==="youth"&&p.age<24)mult*=1.35;  // protects its prospects
  }
- const fee=Math.max(500000,Math.round(base*mult/100000)*100000);
+ const fee=Math.max(IN(500000),Math.round(base*mult/100000)*100000);
  // A famous player is a franchise asset: he draws crowds and sells shirts, so no club
  // lets him go cheaply. Every Marquee and Icon carries a \u00A3200M floor, which in practice
  // means they change hands on free transfers when a deal expires, not for a fee.
- if(isMarquee(p))return Math.max(200000000,fee);
+ if(isMarquee(p))return Math.max(IN(200000000),fee);
  return fee;
 }
 function squadCapNotice(){
@@ -3769,7 +4103,7 @@ function buyPlayer(p){
  const t=userTeamObj();
  if(!inWindow())return toast("Trades only happen in the pre-season window.");
  if(p.team===null)return signPlayer(p);
- const fee=transferFee(p);
+ const fee=Math.round(transferFee(p)*(hasRnD("negotiation")?0.88:1));
  if(inTheRed())return toast("Signings are frozen while the club is in the red.");
  if(t.budget<fee)return toast(`Need ${money(fee)} for this transfer.`);
  if(t.squad.length>=SQUAD_MAX)return toast(`Squad is full (${SQUAD_MAX} max). Sell or release a player to make room.`);
@@ -3871,7 +4205,7 @@ const FACILITY_TIERS=[null,    // index 0 = none; 1 Bronze, 2 Silver, 3 Gold. Up
  {label:"Bronze training facility",short:"Bronze",cost:100000000},
  {label:"Silver training facility",short:"Silver",cost:250000000},
  {label:"Gold training facility",short:"Gold",cost:500000000}];
-function facilityCost(tier){return FACILITY_TIERS[tier]?FACILITY_TIERS[tier].cost:0;}
+function facilityCost(tier){return FACILITY_TIERS[tier]?IN(FACILITY_TIERS[tier].cost):0;}
 function facilityMaintCost(tier){return Math.round(facilityCost(tier)*0.05);}
 function hasSupporters(t){return !!(t&&t.supporters);}
 function jetActive(t){return !!(t&&t.jet&&t.jetMaint==="paid");}
@@ -3879,11 +4213,18 @@ function facilityActive(t){return !!(t&&(t.facility||0)>0&&t.facilityMaint==="pa
 /* Scans every price and returns the one that maximises gate revenue for a given
    fixture (attendance falls as the price rises, so there is a revenue-maximising
    point). Restores G.ticketPrice before returning. */
+function ticketMax(){return Math.max(500,IN(500));}
 function optimalTicketPrice(t,oppId,cupStage){
  // The revenue optimum sits at the clearing price (up to ~\u00A3450 on the biggest nights),
  // so scan the full manual range to catch every case.
- const save=G.ticketPrice;let best=save,bestRev=-1;
- for(let p=5;p<=500;p++){G.ticketPrice=p;const rev=attendance(t,oppId,cupStage)*p;
+ // Coarse sweep then a fine pass around the winner: the manual range grows with
+ // inflation, so a naive £1 scan would run thousands of attendance simulations a render.
+ const save=G.ticketPrice,hi=ticketMax();let best=save,bestRev=-1;
+ const step=Math.max(1,Math.round(hi/120));
+ for(let p=5;p<=hi;p+=step){G.ticketPrice=p;const rev=attendance(t,oppId,cupStage)*p;
+   if(rev>bestRev){bestRev=rev;best=p;}}
+ for(let p=Math.max(5,best-step);p<=Math.min(hi,best+step);p++){G.ticketPrice=p;
+   const rev=attendance(t,oppId,cupStage)*p;
    if(rev>bestRev){bestRev=rev;best=p;}}
  G.ticketPrice=save;return best;
 }
@@ -4001,6 +4342,7 @@ function showPlayer(id){
      <span>Wage: <b>${money(p.team==null?freeAgentWage(p):p.wage)}/wk</b>${p.team==null&&isMarquee(p)?' <span class="gold small">asking</span>':''}</span>
    </div>
    ${p.susp>0?'<div class="small" style="margin-top:8px"><span class="injtag">SUSPENDED</span> Misses the next match.</div>':''}
+   ${p.natDuty?`<div class="small" style="margin-top:8px"><span class="injtag">INTERNATIONAL DUTY</span> Away with ${p.country||"his country"} \u2014 unavailable for the next match.${p.natCaps?` ${p.natCaps} call-up${p.natCaps===1?"":"s"} in his career.`:""}</div>`:''}
    ${p.team===G.userTeam?'<button class="btn sec" data-relmodal="'+p.id+'" style="margin-top:12px">Release from contract</button>':''}
    ${p.age>=40?'<div class="small" style="margin-top:8px"><span class="ret">R</span> Final season. Retires at year\u2019s end.</div>':''}
    <button class="btn sec" style="margin-top:14px">Close</button></div>`));
@@ -4174,11 +4516,11 @@ function bettingCard(){
    mb.appendChild(oddsLine);refresh();
    const sr=$(`<div class="row" style="gap:6px;align-items:center"></div>`);
    const stakeIn=$(`<input type="text" inputmode="numeric" value="${_matchStake.toLocaleString()}" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--line);background:transparent;color:inherit"/>`);
-   stakeIn.oninput=e=>{_matchStake=clamp(parseInt(e.target.value.replace(/[^\d]/g,""))||0,0,MATCH_BET_CAP);refresh();};
+   stakeIn.oninput=e=>{_matchStake=clamp(parseInt(e.target.value.replace(/[^\d]/g,""))||0,0,matchBetCap());refresh();};
    stakeIn.onblur=e=>{e.target.value=_matchStake.toLocaleString();};
    const place=$(`<button class="btn sm">Place bet</button>`);place.onclick=()=>placeMatchBet(_betGF,_betGA,_matchStake);
    sr.appendChild(stakeIn);sr.appendChild(place);mb.appendChild(sr);
-   mb.appendChild($(`<div class="small muted" style="margin-top:4px">Capped at ${money(MATCH_BET_CAP)} per match.</div>`));
+   mb.appendChild($(`<div class="small muted" style="margin-top:4px">Capped at ${money(matchBetCap())} per match.</div>`));
  }
  card.appendChild(mb);
  // preseason futures
@@ -4689,7 +5031,7 @@ function viewSquad(w){
    `<tr><td class="l">${famePill(p)}<span class="pname${isIcon(p)?' goat':''}" data-p="${p.id}">${p.name}</span>${isUnhappy(p)?' <span class="injtag">TRANSFER REQUEST</span>':''}</td><td class="l"><span class="pos ${p.pos}">${p.pos}</span></td>`+
    `<td>${ageCell(p)}</td><td class="gold">${p.ovr}</td><td>${p.gs||0}</td>`+
    `<td class="small">${money(p.wage)}</td><td class="small ${(p.contract||0)<=1?'res-l':'muted'}">${p.runningDown!=null?"leaving":(p.contract||0)+"y"}</td>`+
-   `<td>${p.inj>0?`<span class="injtag">INJ ${p.inj}</span>`:p.susp>0?`<span class="injtag">SUSP</span>`:"\u2713"}</td>`+
+   `<td>${p.inj>0?`<span class="injtag">INJ ${p.inj}</span>`:p.susp>0?`<span class="injtag">SUSP</span>`:p.natDuty?`<span class="injtag">CALL-UP</span>`:"\u2713"}</td>`+
    `<td class="act"><button class="btn tiny sec" data-rel="${p.id}">Release</button></td></tr>`).join("");
  const sqt=$(`<table><thead><tr>
    <th class="l">Player</th><th></th><th>Age</th><th>OVR</th><th>Gls</th><th>Wage</th><th>Deal</th><th>Fit</th><th></th></tr></thead><tbody>${rows}</tbody></table>`);
@@ -5007,14 +5349,17 @@ function viewOffice(w){
      ${line("Merchandise",f.merch)}
      ${line("Player wages",-f.pw)}
      ${line("Staff wages",-f.sw)}
+     ${line(`Stadium upkeep (${t.capacity.toLocaleString()} seats)`,-(f.up||0))}
      <div class="logline" style="font-weight:800"><span>Net last matchday</span>
        <span class="${f.net>=0?'amt-p':'amt-n'}">${f.net>=0?'+':''}${money(f.net)}</span></div></div>`));
  }else fc.appendChild($(`<div class="small muted">Play a matchday to see the weekly ledger.</div>`));
+ {const idx=inflIndex();
+  fc.appendChild($(`<div class="small muted" style="margin-top:6px">Prices and wages across the game have risen <b class="gold">${Math.round((idx-1)*100)}%</b> since season 1 \u00B7 <b>${inflPct()}%</b> this season. Contracts you have already signed do not move: a deal agreed years ago quietly becomes a bargain.</div>`));}
  if(G.ticketManager){
    const nx=nextHomeFixture();
    if(nx)G.ticketPrice=optimalTicketPrice(t,nx.opp,nx.cupStage);
    const mgr=$(`<div style="margin-top:8px;padding:10px;border:1px solid var(--honey);border-radius:8px"></div>`);
-   mgr.appendChild($(`<div class="small"><b class="gold">${G.ticketManager.name}</b> is managing ticket prices \u00B7 ${money(TICKET_MGR_WAGE)}/wk</div>`));
+   mgr.appendChild($(`<div class="small"><b class="gold">${G.ticketManager.name}</b> is managing ticket prices \u00B7 ${money(ticketMgrWage())}/wk</div>`));
    mgr.appendChild($(`<div class="small muted" style="margin-top:3px">He sets the revenue-maximising price for every home fixture automatically.${nx?` Next home fixture priced at <b class="gold">\u00A3${G.ticketPrice}</b> \u00B7 est. attendance ${attendance(t,nx.opp,nx.cupStage).toLocaleString()}/${effCapacity(t).toLocaleString()}.`:""}</div>`));
    const dis=$(`<button class="btn sm sec" style="margin-top:8px">Dismiss ${G.ticketManager.name}</button>`);
    dis.onclick=()=>{G.ticketManager=null;logAdd("Released the ticket manager \u2014 you set prices again.");saveGame(true);render();};
@@ -5022,16 +5367,16 @@ function viewOffice(w){
    fc.appendChild(mgr);
  }else{
    fc.appendChild($(`<div class="slider-row">
-     <div class="ends"><span>Ticket \u00A35</span><span>\u00A3500</span></div></div>`));
-   const tp=$(`<input type="range" min="5" max="500" value="${G.ticketPrice}">`);
+     <div class="ends"><span>Ticket \u00A35</span><span>\u00A3${ticketMax()}</span></div></div>`));
+   const tp=$(`<input type="range" min="5" max="${ticketMax()}" value="${G.ticketPrice}">`);
    const tpl=$(`<div class="small center">Ticket price: <b class="gold">\u00A3${G.ticketPrice}</b> \u00B7 est. attendance ${attendance(t).toLocaleString()}/${effCapacity(t).toLocaleString()}</div>`);
    tp.oninput=()=>{G.ticketPrice=+tp.value;
      tpl.innerHTML=`Ticket price: <b class="gold">\u00A3${G.ticketPrice}</b> \u00B7 est. attendance ${attendance(t).toLocaleString()}/${effCapacity(t).toLocaleString()}`};
    fc.querySelector(".slider-row").appendChild(tp);
    fc.appendChild(tpl);
    const hireBox=$(`<div style="margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:8px"></div>`);
-   hireBox.appendChild($(`<div class="small muted">Hire a ticket manager (${money(TICKET_MGR_WAGE)}/wk) to set the revenue-maximising price for every home fixture automatically \u2014 no more setting it by hand.</div>`));
-   const hire=$(`<button class="btn sm" style="margin-top:8px">Hire ticket manager \u00B7 ${money(TICKET_MGR_WAGE)}/wk</button>`);
+   hireBox.appendChild($(`<div class="small muted">Hire a ticket manager (${money(ticketMgrWage())}/wk) to set the revenue-maximising price for every home fixture automatically \u2014 no more setting it by hand.</div>`));
+   const hire=$(`<button class="btn sm" style="margin-top:8px">Hire ticket manager \u00B7 ${money(ticketMgrWage())}/wk</button>`);
    hire.onclick=()=>{G.ticketManager={name:pick(NAMES.deseret.first)+" "+pick(NAMES.deseret.last)};
      logAdd(`Hired ${G.ticketManager.name} to manage ticket pricing.`);saveGame(true);render();};
    hireBox.appendChild(hire);
@@ -5080,7 +5425,7 @@ function viewOffice(w){
  }else if(t.stadiumLevel>=STADIUM_TIERS.length){
    stad.appendChild($(`<div class="small gold">Maximum stadium size reached.</div>`));
  }else{
-   const plan=STADIUM_TIERS[t.stadiumLevel];
+   const plan=stadiumPlan(t.stadiumLevel);
    const dur=(plan.years||1)===1?"one season":`${plan.years} seasons`;
    const size=plan.target?`up to ${plan.target.toLocaleString()} capacity`:`+${plan.addSeats.toLocaleString()} seats`;
    stad.appendChild($(`<div class="small" style="margin-bottom:8px">Next: <b>${plan.label}</b> for ${money(plan.cost)} (${size}). You play in a reduced-capacity temporary ground for ${dur}, then reopen bigger.</div>`));
@@ -5091,16 +5436,65 @@ function viewOffice(w){
  }
  w.appendChild(stad);
 
+ // ---- Innovation Lab ----
+ {
+  const r=rndState();
+  if(!r.offers.length&&!r.active.length)rndDrawOffers();
+  const lab=$(`<div class="card"></div>`);
+  const landed=Object.keys(r.done).length;
+  lab.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\uD83E\uDDEA Innovation Lab</h3>`));
+  lab.appendChild($(`<div class="small muted" style="margin-bottom:8px">Expensive, slow and genuinely risky. A project that lands changes a rule of your club permanently. A project that fails takes the money with it. ${landed?`<b class="gold">${landed} landed</b>`:"Nothing has landed yet."}</div>`));
+
+  if(r.active.length){
+    lab.appendChild($(`<div class="small" style="margin-bottom:4px"><b>In development</b></div>`));
+    r.active.forEach(a=>{
+      const p=RND_PROJECTS[a.key];if(!p)return;
+      lab.appendChild($(`<div class="logline"><span>${p.name}</span><span class="muted">${a.seasonsLeft} season${a.seasonsLeft===1?"":"s"} left \u00B7 ~${Math.round(a.chance*100)}%</span></div>`));
+    });
+  }
+
+  if(landed){
+    lab.appendChild($(`<div class="small" style="margin:8px 0 4px"><b class="gold">Operating</b></div>`));
+    Object.keys(r.done).forEach(k=>{
+      const p=RND_PROJECTS[k];if(!p)return;
+      lab.appendChild($(`<div class="small" style="margin-bottom:4px"><b class="gold">${p.name}</b> <span class="muted">\u00B7 ${p.effect}</span></div>`));
+    });
+  }
+
+  if(!inWindow()){
+    lab.appendChild($(`<div class="small muted" style="margin-top:8px">New projects can only be commissioned during the pre-season window.</div>`));
+  }else if(!r.offers.length){
+    lab.appendChild($(`<div class="small muted" style="margin-top:8px">Nothing new on the desk this season.</div>`));
+  }else{
+    lab.appendChild($(`<div class="small" style="margin:8px 0 4px"><b>On the desk this season</b></div>`));
+    r.offers.forEach(k=>{
+      const p=RND_PROJECTS[k];if(!p)return;
+      const cost=rndCost(k),fails=r.failed[k]||0;
+      const box=$(`<div style="margin-bottom:8px;padding:8px;border:1px solid var(--line);border-radius:8px"></div>`);
+      box.appendChild($(`<div class="small"><b class="gold">${p.name}</b></div>
+        <div class="small muted" style="margin-top:2px">${p.desc}</div>
+        <div class="small" style="margin-top:3px"><b>If it works:</b> ${p.effect}</div>
+        <div class="small muted" style="margin-top:3px">${money(cost)} \u00B7 ${p.years} season${p.years===1?"":"s"} \u00B7 roughly ${Math.round(p.chance*100)}% chance${fails?` \u00B7 <span class="injtag">failed ${fails}\u00D7 before, price is up</span>`:""}</div>`));
+      const b=$(`<button class="btn sm ${t.budget>=cost?"":"sec"}" style="margin-top:6px">Commission \u00B7 ${money(cost)}</button>`);
+      b.disabled=t.budget<cost;
+      b.onclick=()=>rndFund(k);
+      box.appendChild(b);
+      lab.appendChild(box);
+    });
+  }
+  w.appendChild(lab);
+ }
+
  // ---- Supporters' club coordinator ----
  {const t=userTeamObj();
   const sup=$(`<div class="card"></div>`);
   sup.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Supporters\u2019 club</h3>`));
   if(t.supporters){
-    sup.appendChild($(`<div class="small" style="margin-bottom:8px">A supporters\u2019 club coordinator is on staff \u00B7 ${money(SUPPORTER_COST)}/yr. Your crowd gives a modest boost in <b>home</b> matches.</div>`));
+    sup.appendChild($(`<div class="small" style="margin-bottom:8px">A supporters\u2019 club coordinator is on staff \u00B7 ${money(supporterCost())}/yr. Your crowd gives a modest boost in <b>home</b> matches.</div>`));
     const b=$(`<button class="btn sm sec">Release coordinator</button>`);b.onclick=dismissSupporters;sup.appendChild(b);
   }else{
-    sup.appendChild($(`<div class="small muted" style="margin-bottom:8px">Hire a supporters\u2019 club coordinator (${money(SUPPORTER_COST)}/yr) for a modest home-match boost \u2014 a louder, fuller ground.</div>`));
-    const b=$(`<button class="btn sm">Hire coordinator \u00B7 ${money(SUPPORTER_COST)}/yr</button>`);b.onclick=hireSupporters;sup.appendChild(b);
+    sup.appendChild($(`<div class="small muted" style="margin-bottom:8px">Hire a supporters\u2019 club coordinator (${money(supporterCost())}/yr) for a modest home-match boost \u2014 a louder, fuller ground.</div>`));
+    const b=$(`<button class="btn sm">Hire coordinator \u00B7 ${money(supporterCost())}/yr</button>`);b.onclick=hireSupporters;sup.appendChild(b);
   }
   w.appendChild(sup);}
 
@@ -5137,12 +5531,12 @@ function viewOffice(w){
   const jet=$(`<div class="card"></div>`);
   jet.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Team jet</h3>`));
   if(t.jet){
-    jet.appendChild($(`<div class="small" style="margin-bottom:8px">A team jet keeps the squad fresh on the road \u2014 a modest boost in <b>away</b> matches \u00B7 upkeep ${money(JET_MAINT)}/yr.</div>`));
+    jet.appendChild($(`<div class="small" style="margin-bottom:8px">A team jet keeps the squad fresh on the road \u2014 a modest boost in <b>away</b> matches \u00B7 upkeep ${money(jetMaintCost())}/yr.</div>`));
     if(t.jetMaint==="pending"&&inWindow()){
       const box=$(`<div style="margin-bottom:8px;padding:8px;border:1px solid var(--loss);border-radius:8px"></div>`);
-      box.appendChild($(`<div class="small" style="color:var(--loss)"><b>Jet upkeep due: ${money(JET_MAINT)}.</b> Pay it to keep the away boost this season, or decline and forgo it.</div>`));
+      box.appendChild($(`<div class="small" style="color:var(--loss)"><b>Jet upkeep due: ${money(jetMaintCost())}.</b> Pay it to keep the away boost this season, or decline and forgo it.</div>`));
       const row=$(`<div class="row" style="gap:6px;margin-top:8px"></div>`);
-      const pay=$(`<button class="btn sm" style="flex:1">Pay ${money(JET_MAINT)}</button>`);pay.onclick=payJetMaint;
+      const pay=$(`<button class="btn sm" style="flex:1">Pay ${money(jetMaintCost())}</button>`);pay.onclick=payJetMaint;
       const dec=$(`<button class="btn sm sec" style="flex:1">Decline</button>`);dec.onclick=declineJetMaint;
       row.appendChild(pay);row.appendChild(dec);box.appendChild(row);jet.appendChild(box);
     }else{
@@ -5150,9 +5544,9 @@ function viewOffice(w){
       jet.appendChild($(`<div class="small" style="color:${paid?'var(--win)':'var(--loss)'}">${paid?"Upkeep paid \u2014 away boost active this season.":"Upkeep unpaid \u2014 no away boost this season."}</div>`));
     }
   }else{
-    jet.appendChild($(`<div class="small muted" style="margin-bottom:8px">Buy a team jet (${money(JET_COST)}, then ${money(JET_MAINT)}/yr upkeep) for a modest boost in away matches \u2014 less travel fatigue.</div>`));
-    const bb=$(`<button class="btn sm ${t.budget>=JET_COST?'':'sec'}">Buy team jet \u00B7 ${money(JET_COST)}</button>`);
-    bb.disabled=t.budget<JET_COST;bb.onclick=buyJet;jet.appendChild(bb);
+    jet.appendChild($(`<div class="small muted" style="margin-bottom:8px">Buy a team jet (${money(jetCost())}, then ${money(jetMaintCost())}/yr upkeep) for a modest boost in away matches \u2014 less travel fatigue.</div>`));
+    const bb=$(`<button class="btn sm ${t.budget>=jetCost()?'':'sec'}">Buy team jet \u00B7 ${money(jetCost())}</button>`);
+    bb.disabled=t.budget<jetCost();bb.onclick=buyJet;jet.appendChild(bb);
   }
   w.appendChild(jet);}
 
@@ -5161,8 +5555,8 @@ function viewOffice(w){
   const sp=$(`<div class="card"></div>`);
   sp.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">\uD83D\uDC5F Shoe sponsorship</h3>`));
   if(!G.liaison){
-    sp.appendChild($(`<div class="small muted" style="margin-bottom:8px">Hire a shoe brand liaison (${money(LIAISON_WAGE)}/wk) to chase a sponsorship. They spend a season being evaluated by the brands, then bring a pitch. Deals run ${SHOE_DEAL_LEN} seasons: a signing bonus plus a yearly fee, with cumulative on-field targets to keep the brand happy (hit 3 of 4). Tiers: Gold ${money(SHOE_TIERS.gold.value)}/yr, Silver ${money(SHOE_TIERS.silver.value)}/yr, Bronze ${money(SHOE_TIERS.bronze.value)}/yr.</div>`));
-    const b=$(`<button class="btn sm">Hire liaison \u00B7 ${money(LIAISON_WAGE)}/wk</button>`);b.onclick=hireLiaison;sp.appendChild(b);
+    sp.appendChild($(`<div class="small muted" style="margin-bottom:8px">Hire a shoe brand liaison (${money(liaisonWage())}/wk) to chase a sponsorship. They spend a season being evaluated by the brands, then bring a pitch. Deals run ${SHOE_DEAL_LEN} seasons: a signing bonus plus a yearly fee, with cumulative on-field targets to keep the brand happy (hit 3 of 4). Tiers: Gold ${money(SHOE_TIERS.gold.value)}/yr, Silver ${money(SHOE_TIERS.silver.value)}/yr, Bronze ${money(SHOE_TIERS.bronze.value)}/yr.</div>`));
+    const b=$(`<button class="btn sm">Hire liaison \u00B7 ${money(liaisonWage())}/wk</button>`);b.onclick=hireLiaison;sp.appendChild(b);
   }else if(t.sponsor){
     const d=t.sponsor,bi=brandInfo(d.brand),tier=SHOE_TIERS[d.tier];
     const year=clamp(G.season-d.start+1,1,SHOE_DEAL_LEN);
@@ -5232,7 +5626,7 @@ function viewOffice(w){
    cc.appendChild($(`<div style="margin-bottom:8px">
      <div class="row"><b class="gold" style="font-size:15px">${c.name}</b><span class="small muted">${c.age}y</span></div>
      <div class="small" style="margin-top:2px">${COACH_TIERS[c.tier].label} \u00B7 <b class="gold">${tr.label}</b> \u00B7 ${money(c.wage)}/wk \u00B7 +${COACH_TIERS[c.tier].boost.toFixed(1)} match boost</div>
-     <div class="small ${G.coachRenewal?'':'muted'}" style="margin-top:2px">${G.coachRenewal?'<span class="injtag">CONTRACT EXPIRED</span>':`Contract: ${c.contract} season${c.contract===1?"":"s"} remaining`}</div>
+     <div class="small ${G.coachRenewal?'':'muted'}" style="margin-top:2px">${G.coachRenewal&&G.coachRenewal.kind!=="trophy"?'<span class="injtag">CONTRACT EXPIRED</span>':`Contract: ${c.contract} season${c.contract===1?"":"s"} remaining`}${(c.unsettled||0)>0?` \u00B7 <span class="injtag">UNSETTLED \u00D7${c.unsettled}</span>`:""}</div>
      <div class="small muted" style="margin-top:4px">${COACH_TIERS[c.tier].desc}</div>
      <div class="small muted" style="margin-top:3px"><b>${tr.label}:</b> ${tr.desc}</div>
      ${coachTier()>0?`<div class="small muted" style="margin-top:3px">His standing also makes rival clubs ${coachTier()*3}% likelier to sell to you.</div>`:""}
@@ -5241,12 +5635,13 @@ function viewOffice(w){
    </div>`));
    if(G.coachRenewal){
      const r=G.coachRenewal;
-     cc.appendChild($(`<div class="small" style="margin-bottom:8px;padding:8px;border:1px solid var(--honey);border-radius:8px"><b class="gold">${c.name} wants a new deal:</b> ${money(r.wage)}/wk for ${r.years} years${r.wage>c.wage?` (up from ${money(c.wage)})`:""}. Decide before the first matchday or he walks for nothing.</div>`));
+     const trophy=r.kind==="trophy";
+     cc.appendChild($(`<div class="small" style="margin-bottom:8px;padding:8px;border:1px solid var(--honey);border-radius:8px"><b class="gold">${c.name} wants ${trophy?"his deal reopened":"a new deal"}:</b> ${money(r.wage)}/wk for ${r.years} years${r.wage>c.wage?` (up from ${money(c.wage)})`:""}.${trophy?` He is asking after <b>${r.why}</b>. He is under contract, so refusing costs nothing today \u2014 but he will be far easier to poach.`:" Decide before the first matchday or he walks for nothing."}</div>`));
      const row=$(`<div class="row" style="gap:6px"></div>`);
-     const yes=$(`<button class="btn sm" style="flex:1">Renew \u00B7 ${money(r.wage)}/wk</button>`);
+     const yes=$(`<button class="btn sm" style="flex:1">${trophy?"Agree":"Renew"} \u00B7 ${money(r.wage)}/wk</button>`);
      yes.onclick=()=>renewCoach();
-     const no=$(`<button class="btn sm sec" style="flex:1">Let him go</button>`);
-     no.onclick=()=>{if(confirm(`Let ${c.name} walk? He returns to the open market.`))declineRenewal()};
+     const no=$(`<button class="btn sm sec" style="flex:1">${trophy?"Refuse":"Let him go"}</button>`);
+     no.onclick=()=>{if(confirm(trophy?`Refuse ${c.name}? He stays and honours his contract, but rivals will find him much easier to take.`:`Let ${c.name} walk? He returns to the open market.`))declineRenewal()};
      row.appendChild(yes);row.appendChild(no);cc.appendChild(row);
    }else{
      const sev=coachSeverance();
@@ -5295,7 +5690,7 @@ function viewOffice(w){
    rel.onclick=()=>{G.scoutTier=null;saveGame(true);render()};scc.appendChild(rel);
  }
  scc.appendChild($(`<div class="divider"></div>`));
- scc.appendChild($(`<div class="small"><b>Chief Scout</b> \u00B7 ${money(SUPER_SCOUT_COST)}/yr (${money(Math.round(SUPER_SCOUT_COST/SEASON_LEN))}/matchday on the wage bill) \u00B7 scours all regions and delivers a shortlist of the best young talent on Day 1 of each transfer window.</div>`));
+ scc.appendChild($(`<div class="small"><b>Chief Scout</b> \u00B7 ${money(superScoutCost())}/yr (${money(Math.round(superScoutCost()/SEASON_LEN))}/matchday on the wage bill) \u00B7 scours all regions and delivers a shortlist of the best young talent on Day 1 of each transfer window.</div>`));
  const ssRow=$(`<div class="row" style="margin-top:6px"></div>`);
  if(G.superScout){
    ssRow.appendChild($(`<span class="small gold">Employed \u2605</span>`));
@@ -5315,14 +5710,14 @@ function viewOffice(w){
  // staff
  const stc=$(`<div class="card"></div>`);
  stc.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Staff</h3>
-   <div class="small muted" style="margin-bottom:8px">One hire per role. Wages by quality: \u2605 ${money(STAFF_WAGE[1])}/wk up to \u2605\u2605\u2605\u2605\u2605 ${money(STAFF_WAGE[5])}/wk.</div>`));
+   <div class="small muted" style="margin-bottom:8px">One hire per role. Wages by quality: \u2605 ${money(staffWageOf(1))}/wk up to \u2605\u2605\u2605\u2605\u2605 ${money(staffWageOf(5))}/wk.</div>`));
  for(const role in STAFF_ROLES){
    const mine=G.myStaff[role];
    const box=$(`<div style="margin-bottom:10px">
      <div class="row"><b class="small">${STAFF_ROLES[role].name}</b>
      <span class="small muted">${STAFF_ROLES[role].desc}</span></div></div>`);
    if(mine){
-     const r=$(`<div class="row" style="margin-top:4px"><span class="small">${mine.name} ${stars(mine.stars)} \u00B7 ${money(STAFF_WAGE[mine.stars])}/wk</span></div>`);
+     const r=$(`<div class="row" style="margin-top:4px"><span class="small">${mine.name} ${stars(mine.stars)} \u00B7 ${money(staffWageOf(mine.stars))}/wk</span></div>`);
      const fire=$(`<button class="btn sm sec">Release</button>`);
      fire.onclick=()=>{G.staffPool.push(mine);G.myStaff[role]=null;saveGame(true);render()};
      r.appendChild(fire);box.appendChild(r);
@@ -5330,7 +5725,7 @@ function viewOffice(w){
      const avail=G.staffPool.filter(s=>s.role===role).sort((a,b)=>b.stars-a.stars).slice(0,3);
      if(!avail.length)box.appendChild($(`<div class="small muted">No candidates available right now.</div>`));
      avail.forEach(s=>{
-       const r=$(`<div class="row" style="margin-top:4px"><span class="small">${s.name} ${stars(s.stars)} \u00B7 ${money(STAFF_WAGE[s.stars])}/wk</span></div>`);
+       const r=$(`<div class="row" style="margin-top:4px"><span class="small">${s.name} ${stars(s.stars)} \u00B7 ${money(staffWageOf(s.stars))}/wk</span></div>`);
        const hire=$(`<button class="btn sm">Hire</button>`);
        hire.onclick=()=>{G.myStaff[role]=s;G.staffPool=G.staffPool.filter(x=>x.id!==s.id);
          logAdd(`Hired ${s.name} as ${STAFF_ROLES[role].name}.`);saveGame(true);render()};
