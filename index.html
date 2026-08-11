@@ -423,7 +423,7 @@ function hireCoach(c){
  logAdd(`${c.name} appointed head coach on a ${years}-year deal at ${money(c.wage)}/wk.`);
  awardBadge("first_coach");
  toast(`${c.name} takes charge.`);
- if(G.coachAuto)coachRunSetup();   // he picks his first side immediately
+ if(G.coachAuto){coachRunSetup();G._coachPlanKey=coachPlanKey();}   // he picks his first side immediately
  saveGame(true);render();
 }
 function sackCoach(){
@@ -610,7 +610,11 @@ function wageOf(p){
    agent set a new ceiling that the next one prices off again, and the figure would
    run away to infinity over a long save. */
 function topContractedWage(){
- const key=G.season+"-"+G.matchday;
+ // Keyed on a version counter that every transfer, release and wage change bumps.
+ // The old season-matchday key never changed during a transfer day, so a wage that
+ // rose from 26k to 2.64M mid-window kept returning the stale figure and underpriced
+ // every Marquee and Icon free-agent demand made after it.
+ const key=G.season+"-"+G.matchday+"-"+(G.wageVersion||0);
  if(G._topWage&&G._topWage.key===key)return G._topWage.v;
  let top=0;
  for(const q of G.players){if(q.team!=null&&(q.wage||0)>top)top=q.wage;}
@@ -644,6 +648,7 @@ function squadFull(t){return((t&&t.squad)||[]).length>=SQUAD_MAX;}
 function addToAcademy(t,p){
  if(!t.academy)t.academy=[];
  if(academyFull(t))return false;
+ if(p.academyClubId==null){p.academyClubId=t.id;p.academyGraduate=false;}
  if(p.team!==t.id)joinClub(p,t.id);      // an academy spell counts as time at the club
  t.squad=t.squad.filter(id=>id!==p.id);
  if(!t.academy.includes(p.id))t.academy.push(p.id);
@@ -654,11 +659,53 @@ function promoteFromAcademy(t,p){
  if(squadFull(t))return false;
  t.academy=t.academy.filter(id=>id!==p.id);
  if(!t.squad.includes(p.id))t.squad.push(p.id);
- p.team=t.id;return true;
+ p.team=t.id;
+ // The one and only place a player becomes an academy graduate. Badges used to infer
+ // it from "first history entry matches this club", which every starting senior at
+ // world generation also satisfies, so Class of the Academy unlocked with the original
+ // eleven before a single prospect had come through.
+ if(p.academyClubId===t.id)p.academyGraduate=true;
+ return true;
 }
 function releaseFromAcademy(t,p){
  if(t.academy)t.academy=t.academy.filter(id=>id!==p.id);
- p.team=null;if(!G.freeAgents.includes(p.id))G.freeAgents.push(p.id);
+ releasePlayerToPool(p);
+}
+/* ---- central player movement API ----
+   Every arrival and departure runs through one of these three. Doing it by hand in a
+   dozen feature-specific places is how a club ended up holding an id for a man who was
+   no longer anywhere, and how a released player kept an open career spell that read as
+   "still playing" on his card. One door in, one door out. */
+function markWagesDirty(){G.wageVersion=(G.wageVersion||0)+1;delete G._topWage;}
+function releasePlayerToPool(p){
+ if(!p)return;
+ joinClub(p,null);                                   // closes the open career spell
+ detachPlayer(p);                                    // squad / academy / unhappy / freeAgents
+ p.team=null;
+ delete p.unhappySince;delete p.promised;
+ if(G.xi)G.xi=G.xi.filter(id=>id!==p.id);
+ if(!G.freeAgents.includes(p.id))G.freeAgents.push(p.id);
+ markWagesDirty();
+}
+function movePlayerToClub(p,team,toAcademy){
+ if(!p||!team)return false;
+ joinClub(p,team.id);
+ detachPlayer(p);
+ p.team=team.id;
+ if(toAcademy){team.academy=team.academy||[];if(!team.academy.includes(p.id))team.academy.push(p.id);}
+ else if(!team.squad.includes(p.id))team.squad.push(p.id);
+ delete p.unhappySince;delete p.promised;
+ markWagesDirty();
+ return true;
+}
+/* A club leaving the pyramid takes nobody with it. Its seniors AND its academy are
+   returned to the pool with their spells closed, before the id is recycled by an
+   incoming expansion club. */
+function releaseClubPlayers(team){
+ if(!team)return;
+ const ids=[...(team.squad||[]),...(team.academy||[])];
+ ids.forEach(id=>{const p=P(id);if(p)releasePlayerToPool(p);});
+ team.squad=[];team.academy=[];team.unhappy=[];
 }
 /* A prospect his own club can't fit is not simply discarded: smaller clubs are glad of
    him. Find a club with a senior slot (or academy room if he is still young enough) and
@@ -678,13 +725,24 @@ function placeReleasedYouth(p,fromId){
    return true;
  })||wants[0];
  if(!suitor)return null;
- detachPlayer(p);
- joinClub(p,suitor.id);p.team=suitor.id;suitor.squad.push(p.id);
+ movePlayerToClub(p,suitor);
  p.wage=wageOf(p);p.contract=newContractYears();
- delete p.unhappySince;delete p.promised;
+ markWagesDirty();
  return suitor;
 }
 function squadWage(t){return squadOf(t).reduce((s,p)=>s+p.wage,0);}
+/* One gate calculation for every home fixture. Cup gates used to skip the Dynamic
+   Pricing research bonus entirely, so a permanent 15% upgrade quietly stopped applying
+   the moment the cup started, and sold-out and box-office badges saw different numbers
+   depending on which competition was being played. */
+function gateRevenue(att){return Math.round(att*G.ticketPrice*(hasRnD("pricing")?1.15:1));}
+/* The soft population cap has to be derived from what the world can hold, not guessed.
+   90 clubs at a 20-man senior cap is 1,800 held players before a single academy is
+   counted, and academies refill toward 18 apiece. */
+function playerPopulationTarget(){
+ const clubs=(G.teams||[]).length||REGIONS.length*PER_TIER*3;
+ return clubs*(SQUAD_MAX+ACADEMY_MAX-2)+clubs*4;
+}
 function staffWageOf(stars){return IN(STAFF_WAGE[stars]||0);}
 function staffWage(){let s=0;for(const r in G.myStaff){const st=G.myStaff[r];if(st)s+=staffWageOf(st.stars)}
  if(G.scoutTier)s+=IN(SCOUT_TIERS[G.scoutTier].wage);
@@ -701,7 +759,7 @@ function newPlayer(id,pos,age,regionKey){
  const p={id,name:pick(nm.first)+" "+pick(nm.last),pos,age,region:rk,nat:pick(COUNTRIES),
    pot:56+Math.floor(Math.pow(Math.random(),1.6)*43),team:null,inj:0,
    gs:0,gc:0,as:0,ac:0,susp:0,wcWins:0,wcApps:0,tippyWins:0,tippyApps:0,gbWins:0,fame:0,
-   eliteYears:0,topYears:0,leagueWins:0,contWins:0};
+   eliteYears:0,topYears:0,leagueWins:0,contWins:0,careerSeeded:1};
  // ~5% of the very brightest 16-year-old prospects (POT 90+) are secretly busts: a
  // real ceiling far below their potential, hidden from everyone including scouts, so
  // they look world-beating on paper but quietly stall and never make it.
@@ -766,6 +824,7 @@ function genWorld(ownerName){
        const p=newPlayer(pid++,pos,ri(16,21),reg.key);
        p.team=t.id;t.academy.push(p.id);players.push(p);
        p.history=[{club:t.name,in:1,gcAt:0,acAt:0}];
+       p.academyClubId=t.id;p.academyGraduate=false;
      }
    });
  });
@@ -790,7 +849,7 @@ function genWorld(ownerName){
  // The world does not begin on day one: its thirty-year-olds have had careers, so give
  // them a record consistent with what they are, or the ceiling would flatten every
  // veteran in the game to a Marquee on the opening screen.
- G.players.forEach(p=>seedCareerRecord(p));
+ G.players.forEach(p=>seedCareerRecord(p,true));   // forced: the founding world gets a past
  G.players.forEach(p=>p.fame=fameSeed(p));   // the world starts with stars already in it
  G.coachPool=genCoachPool();
 }
@@ -819,17 +878,145 @@ function makeFixtures(n){
 }
 
 /* ======================= SAVE / LOAD ======================= */
+/* Most of a save is players, and most of a player is zeroes: a squad filler has never
+   played at a World Cup, never won a league, never been booked. Dropping fields that
+   are at their default and restoring them on the way back in cuts a long career's save
+   by about a quarter, which matters because localStorage is a hard 5MB wall and an
+   18-season world was already past 2.4MB and climbing.
+
+   The flag below is what makes this safe: only a save that was WRITTEN compactly gets
+   its defaults restored. A genuinely old save with a field missing still falls through
+   to the original migration logic that derives a sensible value for it. */
+const COMPACT_ZERO=["gs","gc","as","ac","susp","inj","wcWins","wcApps","tippyWins",
+  "tippyApps","gbWins","fame","eliteYears","topYears","leagueWins","contWins","natCaps"];
+function serializeSave(){
+ const flat=JSON.stringify(G);
+ const g=JSON.parse(flat);
+ g._compact=1;
+ g.players.forEach(p=>{
+   COMPACT_ZERO.forEach(k=>{if(!p[k])delete p[k]});
+   delete p.seasonClub;                       // rebuilt at every season end
+   if(p.careerSeeded)delete p.careerSeeded;   // restored to 1 on expand
+   if(p.history&&!p.history.length)delete p.history;
+ });
+ delete g._topWage;                           // pure cache
+ delete g._rndRecordOpen;                     // pure UI state
+ delete g._coachPlanKey;                      // pure cache
+ return JSON.stringify(g);
+}
+function expandCompactSave(g){
+ if(!g||!g._compact)return g;
+ g.players.forEach(p=>{
+   COMPACT_ZERO.forEach(k=>{if(p[k]===undefined)p[k]=0});
+   if(p.careerSeeded===undefined)p.careerSeeded=1;
+ });
+ return g;
+}
 function saveGame(silent){
- try{localStorage.setItem(SAVE_KEY,JSON.stringify(G));
+ try{localStorage.setItem(SAVE_KEY,serializeSave());
+   if(G)G.saveError=null;
    if(!silent)toast("Game saved.");return true;}
- catch(e){if(!silent)toast("Save failed. Browser storage may be blocked.");return false;}
+ catch(e){
+   // A silent autosave that fails silently is the worst outcome available: the player
+   // keeps playing for hours believing the career is being written down. Record it and
+   // let the header show a standing warning until a save succeeds.
+   if(G)G.saveError=String(e&&e.message||e);
+   if(!silent)toast("Save failed. Browser storage may be blocked.");
+   else{try{toast("Autosave failed \u2014 storage may be full. Export a backup.");}catch(_){}}
+   return false;}
+}
+/* Structural validation of an untrusted or on-disk save. Throws on faults that cannot
+   be repaired without guessing. Version and non-empty arrays were never enough: a save
+   can be the right version and still hold the same player at two clubs at once.
+
+   Faults that older saves are KNOWN to carry (players orphaned by the club-expulsion
+   bug, stale free-agent entries) are deliberately not fatal here. They are repaired in
+   repairWorld() during hydrate instead, because refusing to load a long career over a
+   bug this build introduced would be the worse failure by a distance. */
+function validateSaveShape(g){
+ if(!g||typeof g!=="object")throw new Error("not an object");
+ if(g.ver!==4)throw new Error("wrong version");
+ if(!Array.isArray(g.teams)||!g.teams.length)throw new Error("no teams");
+ if(!Array.isArray(g.players)||!g.players.length)throw new Error("no players");
+ if(!Array.isArray(g.freeAgents))throw new Error("no free agent list");
+ if(g.userTeam==null)throw new Error("no user club");
+ const tid=new Set(),pid=new Set();
+ g.teams.forEach(t=>{
+   if(t==null||typeof t!=="object")throw new Error("bad team entry");
+   if(tid.has(t.id))throw new Error("duplicate team id "+t.id);
+   tid.add(t.id);
+   if(!REGIONS.some(r=>r.key===t.region))throw new Error("bad region on team "+t.id);
+   if(!(t.tier>=0&&t.tier<=2))throw new Error("bad tier on team "+t.id);
+   if(!Array.isArray(t.squad))throw new Error("bad squad on team "+t.id);
+   if(t.academy!=null&&!Array.isArray(t.academy))throw new Error("bad academy on team "+t.id);
+   if(!isFinite(t.budget))throw new Error("non-finite budget on team "+t.id);
+ });
+ g.players.forEach(p=>{
+   if(p==null||typeof p!=="object")throw new Error("bad player entry");
+   if(pid.has(p.id))throw new Error("duplicate player id "+p.id);
+   pid.add(p.id);
+ });
+ if(!tid.has(g.userTeam))throw new Error("user club is not in the world");
+ const held=new Set();
+ g.teams.forEach(t=>{
+   [...t.squad,...(t.academy||[])].forEach(id=>{
+     if(held.has(id))throw new Error("player "+id+" held by two clubs");
+     held.add(id);
+   });
+ });
+ return g;
+}
+/* Everything validateSaveShape declines to die over gets straightened out here. Runs on
+   every load and import, and after world generation, so the invariants the rest of the
+   game assumes are true by the time anything reads them. */
+function repairWorld(){
+ const byId=new Map();G.players.forEach(p=>{if(p)byId.set(p.id,p)});
+ const held=new Map();
+ G.teams.forEach(t=>{
+   if(!Array.isArray(t.squad))t.squad=[];
+   if(!Array.isArray(t.academy))t.academy=[];
+   if(!Array.isArray(t.unhappy))t.unhappy=[];
+   // drop ids that point at nobody, and ids a previous club already claimed
+   t.squad=t.squad.filter(id=>byId.has(id)&&!held.has(id)&&held.set(id,t.id));
+   t.academy=t.academy.filter(id=>byId.has(id)&&!held.has(id)&&held.set(id,t.id));
+   t.unhappy=t.unhappy.filter(id=>t.squad.includes(id));
+   t.squad.forEach(id=>{byId.get(id).team=t.id});
+   t.academy.forEach(id=>{byId.get(id).team=t.id});
+ });
+ // Orphans: p.team names a club, but no club is holding him. This is the residue of the
+ // expulsion bug, where an expelled club's academy kept pointing at an id that an
+ // expansion club later recycled. They go back to the market where they belong.
+ let orphans=0;
+ G.players.forEach(p=>{
+   if(!p)return;
+   if(p.team!=null&&held.get(p.id)!==p.team){p.team=null;orphans++;}
+ });
+ const seen=new Set();
+ G.freeAgents=(G.freeAgents||[]).filter(id=>{
+   if(seen.has(id)||!byId.has(id)||held.has(id))return false;
+   seen.add(id);return true;
+ });
+ G.players.forEach(p=>{if(p&&p.team==null&&!seen.has(p.id)){G.freeAgents.push(p.id);seen.add(p.id);}});
+ if(G.xi)G.xi=G.xi.filter(id=>byId.has(id)&&byId.get(id).team===G.userTeam);
+ if(orphans)G._repairedOrphans=(G._repairedOrphans||0)+orphans;
+ return orphans;
 }
 function loadGame(){
- try{const raw=localStorage.getItem(SAVE_KEY);if(!raw)return false;
-   const g=JSON.parse(raw);if(!g)return false;
-   if(g.ver!==4)return false;       // pre-region saves cannot be migrated; start fresh
-   G=g;hydrateLoadedG();return true;}
- catch(e){return false;}
+ // The previous G is kept and restored on any failure. Assigning first and hydrating
+ // afterwards meant a save that threw during migration left the game pointing at the
+ // broken object, with no way back.
+ const backup=G;
+ try{
+   const raw=localStorage.getItem(SAVE_KEY);if(!raw)return false;
+   const g=expandCompactSave(JSON.parse(raw));
+   validateSaveShape(g);
+   G=g;hydrateLoadedG();
+   if(!userTeamObj())throw new Error("user club missing after hydrate");
+   return true;
+ }catch(e){
+   G=backup;if(G)rebuildIndex();
+   return false;
+ }
 }
 function hydrateLoadedG(){
  // Runs the full migration/repair pass on an already-assigned G, whether it
@@ -944,6 +1131,12 @@ function hydrateLoadedG(){
      squadOf(a).reduce((s,p)=>s+p.ovr,0)-squadOf(b).reduce((s,p)=>s+p.ovr,0));
    G.userTeam=low.length?low[0].id:G.teams[0].id;
  }
+ // last: straighten out every ownership invariant the rest of the game assumes
+ const fixed=repairWorld();
+ markWagesDirty();
+ rebuildIndex();
+ if(fixed)G.log&&G.log.unshift({s:G.season,md:G.matchday,
+   text:`${fixed} player${fixed===1?"":"s"} left stranded by a departed club have been returned to the free market.`,amt:0});
 }
 function wipeSave(){try{localStorage.removeItem(SAVE_KEY)}catch(e){}}
 
@@ -970,7 +1163,7 @@ function exportSave(){
  if(!G||G.userTeam==null)return toast("Start or load a game before exporting.");
  saveGame(true);                       // make sure the on-disk copy is current first
  const fname=saveFileName();
- let json;try{json=JSON.stringify(G);}catch(e){return toast("Could not serialize the save.");}
+ let json;try{json=serializeSave();}catch(e){return toast("Could not serialize the save.");}
  const blob=new Blob([json],{type:"application/json"});
  // On mobile, prefer the native share sheet so the player can send the backup
  // to themselves (AirDrop, Messages, iCloud, Drive) in one gesture. Fall back
@@ -1005,9 +1198,12 @@ function importSaveText(text){
  catch(e){return{ok:false,msg:"That file isn't valid JSON \u2014 not an Empire FC 2 save."};}
  if(!g||typeof g!=="object")return{ok:false,msg:"That file isn't an Empire FC 2 save."};
  if(g.ver!==4)return{ok:false,msg:"That save is from an incompatible version and can't be loaded."};
- if(!Array.isArray(g.teams)||!g.teams.length||!Array.isArray(g.players)||!g.players.length||g.userTeam==null)
-   return{ok:false,msg:"That save is missing core data and looks corrupted."};
  scrubSaveStrings(g,0);                // untrusted file: strip anything that could inject markup
+ expandCompactSave(g);                 // restore the fields compact serialization dropped
+ // Same structural validator the disk load uses, so an imported file cannot get in
+ // through a laxer door than the autosave does.
+ try{validateSaveShape(g);}
+ catch(e){return{ok:false,msg:"That save is inconsistent and can't be loaded safely."};}
  const backup=G;
  try{
    G=g;hydrateLoadedG();
@@ -1071,7 +1267,7 @@ function assignNatDuty(){
    G.natDuty.push({club:t.id,pid:p.id});
    if(t.id===G.userTeam){
      p.natCaps=(p.natCaps||0)+1;
-     logAdd(`${p.name} has been called up by ${p.country||"his country"} and misses the next match.`);
+     logAdd(`${p.name} has been called up by ${p.nat||"his country"} and misses the next match.`);
    }else{p.natCaps=(p.natCaps||0)+1;}
  });
 }
@@ -1191,6 +1387,7 @@ function coachPickXI(t){
  return xi;
 }
 function coachRunSetup(){
+ // callers that force a re-plan bypass the cache key; it is refreshed by coachEnsurePlan
  // the coach sets up the side at his tier. Silent: no log, toast, save or
  // render, so it can run inside the matchday loop or a re-render. Returns the
  // list of things he did (for the manual button to narrate), or null.
@@ -1211,6 +1408,25 @@ function coachRunSetup(){
    else notes.push("tuned your tactics");}
  return notes;
 }
+/* The coach's plan is made at explicit moments and cached against the situation that
+   produced it. If nothing that matters has changed, the stored plan is reused, so a
+   render can display it without re-picking the side or re-running the tactical search. */
+function coachPlanKey(){
+ const t=userTeamObj();if(!t)return "none";
+ const nx=nextOpponent();
+ const avail=squadOf(t).filter(p=>p&&p.inj<=0&&(p.susp||0)<=0&&!p.natDuty)
+   .map(p=>p.id).sort((a,b)=>a-b).join(",");
+ return [G.season,G.matchday,nx?nx.opp:"-",nx?nx.comp:"-",coachTier(),
+   G.coach?G.coach.id:"-",avail].join("|");
+}
+function coachEnsurePlan(){
+ if(coachTier()<1)return null;
+ const key=coachPlanKey();
+ if(G._coachPlanKey===key)return null;   // nothing has changed; the stored plan stands
+ const notes=coachRunSetup();
+ G._coachPlanKey=key;
+ return notes;
+}
 function coachAutoSetup(){
  // manual "do it once now" button
  if(coachTier()<1)return toast("Hire a head coach to use auto pick.");
@@ -1220,6 +1436,10 @@ function coachAutoSetup(){
  saveGame(true);render();
 }
 function autoXI(team,formation,useAll){
+ // useAll is a deliberate emergency override, not a silent fallback. The old code
+ // recursed into it whenever eleven fit men could not be found, which quietly put
+ // injured, suspended and internationally-called-up players on the pitch. A club
+ // short of bodies now plays short of bodies and takes the penalty in strength().
  const F=FORMATIONS[formation];
  const pool=useAll?squadOf(team):fit(squadOf(team));
  const by=(a,b)=>b.ovr-a.ovr;
@@ -1230,13 +1450,24 @@ function autoXI(team,formation,useAll){
  let xi=[...g,...d,...m,...f];
  if(xi.length<11){const used=new Set(xi.map(p=>p.id));
    pool.filter(p=>!used.has(p.id)).sort(by).forEach(p=>{if(xi.length<11)xi.push(p)});}
- if(xi.length<11&&!useAll)return autoXI(team,formation,true);
+ // still short: promote fit academy players before ever considering an unfit senior
+ if(xi.length<11&&!useAll){
+   const used=new Set(xi.map(p=>p.id));
+   fit(academyOf(team)).filter(p=>!used.has(p.id)).sort(by)
+     .forEach(p=>{if(xi.length<11)xi.push(p)});
+ }
  return xi;
 }
+/* A side that cannot field eleven is punished for it rather than being quietly topped
+   up with men who are not fit to play. Roughly proportional: nine men is a hiding. */
+function manpower(xi){return clamp((xi.length||0)/11,0.5,1);}
 function strength(xi){
  let atk=0,def=0,wa=0,wd=0;
  xi.forEach(p=>{atk+=p.ovr*ATKW[p.pos];wa+=ATKW[p.pos];def+=p.ovr*DEFW[p.pos];wd+=DEFW[p.pos]});
- return{atk:atk/(wa||1),def:def/(wd||1)};
+ // Playing short is a real disadvantage and now costs what it should. Defence suffers
+ // more than attack, because a missing man is a hole rather than a lost option.
+ const mp=manpower(xi);
+ return{atk:(atk/(wa||1))*mp,def:(def/(wd||1))*Math.pow(mp,1.35)};
 }
 function poisson(l){let L=Math.exp(-l),k=0,p=1;do{k++;p*=Math.random()}while(p>L);return k-1;}
 const NEU={mentality:50,pressing:50};
@@ -1366,7 +1597,7 @@ function playMatchday(){
  // fully delegated: the coach sets the side himself before every kickoff.
  // Runs now that injuries have healed and before the fixture is read, so a
  // Tactician still prepares for this exact opponent.
- if(G.coachAuto&&coachTier()>0)coachRunSetup();
+ if(G.coachAuto&&coachTier()>0){coachRunSetup();G._coachPlanKey=coachPlanKey();}
  if(G.matchday===0){G.badgeStats=G.badgeStats||{};G.badgeStats.seasonStartBudget=userTeamObj().budget;}
  // Every 5 seasons, right before the last league matchday, drop the bomb: every club
  // loses one key player to an off-field crisis. Guarded so it fires once per cycle.
@@ -1407,8 +1638,13 @@ function playMatchday(){
  maybeEvent();
  aiTransfers();
  if(ALL_CUP_MARKS.includes(G.matchday))playCupRound();
- clearNatDuty();assignNatDuty();   // the next round's call-ups, visible before you pick
+ // No call-ups are drawn after the final league match. The Conrad Cup is played
+ // immediately afterwards using teamXI, so a call-up issued here made men unavailable
+ // for a tournament that has no "next round" to miss.
+ clearNatDuty();
+ if(G.matchday<SEASON_LEN)assignNatDuty();   // the next round's call-ups, visible before you pick
  checkBadges();
+ integrityGuard("matchday");
  saveGame(true);
 }
 
@@ -1468,17 +1704,28 @@ function famePill(p){
    likely to have won. Derived from what we can see - his age, his rating, his goals -
    so a 33-year-old 92-rated forward reads like a man with a decade behind him, and a
    28-year-old squad defender reads like exactly what he is. Only ever fills blanks. */
-function seedCareerRecord(p){
+/* Give a player a career consistent with what he already is. Runs ONCE per player and
+   then never again, which is the whole point of the flag.
+
+   It used to guard on `== null`, but newPlayer() initialises every one of these fields
+   to 0, so at world generation every guard was already false and the seeder did nothing
+   at all. A fresh world's thirty-year-olds therefore had no record, which pinned their
+   fame ceiling at ~63 and made an Icon impossible for anyone who had not built a career
+   inside the save. The `ac` line guarded on falsiness instead, so it fired on EVERY
+   load, handing a genuinely uncapped player ~200 appearances he never made. */
+function seedCareerRecord(p,force){
  if(!p)return;
+ if(p.careerSeeded&&!force)return;
  const yrs=clamp(p.age-18,0,20);
- if(p.eliteYears==null){
+ if(!p.eliteYears){
    const eliteRate=p.ovr>=90?0.55:p.ovr>=86?0.32:p.ovr>=82?0.12:0;
    p.eliteYears=Math.round(yrs*eliteRate*fameRole(p));
  }
- if(p.topYears==null)p.topYears=Math.round((p.eliteYears||0)*(p.ovr>=92?0.4:0.15));
- if(p.leagueWins==null)p.leagueWins=Math.round(yrs*(p.ovr>=88?0.28:p.ovr>=82?0.14:0.05));
- if(p.contWins==null)p.contWins=Math.round(yrs*(p.ovr>=90?0.12:p.ovr>=84?0.05:0));
+ if(!p.topYears)p.topYears=Math.round((p.eliteYears||0)*(p.ovr>=92?0.4:0.15));
+ if(!p.leagueWins)p.leagueWins=Math.round(yrs*(p.ovr>=88?0.28:p.ovr>=82?0.14:0.05));
+ if(!p.contWins)p.contWins=Math.round(yrs*(p.ovr>=90?0.12:p.ovr>=84?0.05:0));
  if(!p.ac)p.ac=Math.round(yrs*SEASON_LEN*0.62);
+ p.careerSeeded=1;
 }
 function fameSeed(p){
  if(!p||p.team==null)return 0;
@@ -1546,7 +1793,11 @@ function fameCareerCeil(p){
     the body of work grows. A twenty-eight year old at the peak of his powers tops out
     around seventy-six: the best player in the world, and still not an Icon yet. */
  c=Math.min(c,FAME_FORM_CEIL+Math.max(0,(p.age||0)-22)*2.4);
- return clamp(c,0,100);
+ // Returned rounded, because fame itself is an integer. The in-play update applied the
+ // ceiling to a fractional value and THEN rounded, so a ceiling of 66.7 produced a fame
+ // of 67 that sat one point above its own limit until a load quietly shaved it back.
+ // Whether a star read 67 or 66 therefore depended on whether you had reloaded.
+ return Math.round(clamp(c,0,100));
 }
 /* A short, readable account of why he is (or is not) an Icon yet. */
 function fameResume(p){
@@ -1669,16 +1920,19 @@ function resolveSaga(){
    if(!best||sc>best.sc)best={...o,sc};
  });
  if(!best)best=field[0];
- let won=T(best.id);
- sg.resolved=true;sg.winner=best.id;sg.finalWage=best.wage;
  // A club already down to its floor cannot afford to lose him for nothing as well, so
  // it finds the money and he stays. Without this the move could push a thin squad
  // below SQUAD_MIN, which nothing downstream is allowed to assume.
+ //
+ // The saga record is written AFTER this adjustment. Writing it before meant the news
+ // feed and the saga history could name a winner the player never actually joined, on
+ // a wage he was never actually paid.
  const oldClub=T(sg.fromClub);
  if(best.id!==p.team&&oldClub&&oldClub.squad.length<=SQUAD_MIN)best={id:sg.fromClub,wage:Math.round(wageOf(p)*2.05)};
- won=T(best.id);
+ const won=T(best.id);
+ sg.resolved=true;sg.winner=best.id;sg.finalWage=best.wage;
  if(best.id!==p.team){
-   detachPlayer(p);joinClub(p,won.id);p.team=won.id;won.squad.push(p.id);
+   movePlayerToClub(p,won);
    aiFundAndMakeRoom(won,p.id);                 // the winner pays for it somewhere
  }
  p.wage=best.wage;p.contract=newContractYears();
@@ -1747,9 +2001,9 @@ function fameTick(){
    if(bestGk&&p.id===bestGk.id&&p.ovr>=90)f+=9;        // the undisputed best keeper alive
    f=Math.max(f,fameFloor(p));
    // Form can make you the most famous player alive. Only a CAREER makes you an Icon.
-   f=Math.min(f,fameCareerCeil(p));
    if(acad)f=Math.min(f,FAME_ACADEMY_CEIL);
-   p.fame=clamp(Math.round(f),0,100);
+   // ceiling applied last, and to the rounded figure, so it is a real limit
+   p.fame=clamp(Math.min(Math.round(f),fameCareerCeil(p)),0,100);
  });
 }
 function bootRace(){
@@ -2050,6 +2304,11 @@ function badgeCtx(){
    rank1:prestigeRank(t.id,globalPrestige())===1,
    leagueRun:_runMax(t.leagueTitleSeasons||[]),regRun:_runMax(regWins),contRun:_runMax(contWins),
    regWinCount:regWins.length,goatOwned:squadOf(t).some(isIcon),
+   // Signing an Icon and keeping an Icon for a whole season are different achievements
+   // and now have different tests. Both used to read goatOwned, so both unlocked the
+   // instant one arrived and the "full season" wording was a lie.
+   iconFullSeason:squadOf(t).some(p=>isIcon(p)&&(G.badgeStats||{}).iconSince!=null
+     &&G.season>(G.badgeStats||{}).iconSince),
    gbUser,
    wcApp:mine.some(p=>(p.wcApps||0)>0),wcWin:mine.some(p=>(p.wcWins||0)>0),
    wcWinners:mine.filter(p=>(p.wcWins||0)>0).length,wcSquadMax:0,
@@ -2105,7 +2364,7 @@ const BADGES=[
  {id:"club_record",name:"Club Record",desc:"Break your club\u2019s all-time scoring record"},
  {id:"season_haul",name:"Season Haul",desc:"Have a player score 25+ goals in a season"},
  {id:"hat_trick",name:"Hat-Trick Hero",desc:"Score a hat-trick in a match"},
- {id:"goat_season",name:"Icon Season",desc:"Have an Icon on your books for a full season",f:(t,x)=>x.goatOwned},
+ {id:"goat_season",name:"Icon Season",desc:"Have an Icon on your books for a full season",f:(t,x)=>x.iconFullSeason},
  {id:"goat_whisperer",name:"Icon Whisperer",desc:"Sign an Icon",f:(t,x)=>x.goatOwned},
  {id:"homegrown_hero",name:"Homegrown Hero",desc:"Win the Golden Boot with a player from your own region"},
  {id:"aging_master",name:"Aging Master",desc:"Win the Golden Boot with a player aged 35+"},
@@ -2205,13 +2464,16 @@ function checkBadges(){
  const bs=G.badgeStats||{};
  if(bs.hitBottom&&(t.contTitles||0)>=1)awardBadge("phoenix");
  // ---- Empire FC 2 squad/academy/market badges ----
+ {const hasIcon=squadOf(t).some(isIcon);
+  if(hasIcon&&bs.iconSince==null)(G.badgeStats=G.badgeStats||{}).iconSince=G.season;
+  if(!hasIcon)delete (G.badgeStats||{}).iconSince;}
  if((t.academy||[]).length>=ACADEMY_MAX)awardBadge("academy_full");
  if(academyOf(t).some(p=>p.pot>=90))awardBadge("academy_gem");
  {const bill=squadWage(t);if(bill>=500000)awardBadge("wage_bill");}
  // academy graduates: a player whose career began at your club
- const grads=squadOf(t).filter(p=>p&&(p.history||[]).length&&p.history[0].club===t.name);
+ const grads=squadOf(t).filter(p=>p&&p.academyGraduate&&p.academyClubId===t.id);
  if(grads.some(p=>p.ovr>=85))awardBadge("academy_star");
- if((G.xi||[]).map(P).filter(p=>p&&(p.history||[]).length&&p.history[0].club===t.name).length>=5)
+ if((G.xi||[]).map(P).filter(p=>p&&p.academyGraduate&&p.academyClubId===t.id).length>=5)
    awardBadge("homegrown_xi");
  if(squadOf(t).some(p=>p&&(p.ac||0)>=200&&(p.history||[]).length===1&&p.history[0].club===t.name))
    awardBadge("loyal_one_club");
@@ -2488,8 +2750,8 @@ function aiResolveUnhappy(){
        if(tt.unhappy)tt.unhappy=tt.unhappy.filter(id=>id!==p.id);});
      G.freeAgents=G.freeAgents.filter(id=>id!==p.id);
      delete p.unhappySince;
-     if(buyer){buyer.budget-=fee;t.budget+=fee;joinClub(p,buyer.id);p.team=buyer.id;buyer.squad.push(p.id);}
-     else{joinClub(p,null);p.team=null;G.freeAgents.push(p.id);}
+     if(buyer){buyer.budget-=fee;t.budget+=fee;movePlayerToClub(p,buyer);}
+     else releasePlayerToPool(p);
    });
  });
 }
@@ -2507,13 +2769,28 @@ function sellUnhappy(p){
  t.unhappy=(t.unhappy||[]).filter(id=>id!==p.id);
  delete p.unhappySince;
  if(G.xi)G.xi=G.xi.filter(id=>id!==p.id);
- t.budget+=fee;
- if(buyer){buyer.budget-=fee;joinClub(p,buyer.id);p.team=buyer.id;buyer.squad.push(p.id);
-   logAdd(`Sold ${p.name} to ${buyer.name} for a cut-price ${money(fee)} \u2014 he wanted out.`,fee);}
- else{const landed=placeReleasedYouth(p,t.id);
-   if(landed)logAdd(`Sold ${p.name} to ${landed.name} for a cut-price ${money(fee)} \u2014 he wanted out.`,fee);
-   else{p.team=null;if(!G.freeAgents.includes(p.id))G.freeAgents.push(p.id);
-     logAdd(`${p.name} left for ${money(fee)} \u2014 he wanted out.`,fee);}}
+ // The fee is credited inside the branch where a club actually pays it. Crediting it
+ // up front meant the fallback placement (a club that pays nothing) still handed the
+ // president the money, minting cash out of the world every forced sale.
+ if(buyer){
+   buyer.budget-=fee;t.budget+=fee;
+   movePlayerToClub(p,buyer);
+   logAdd(`Sold ${p.name} to ${buyer.name} for a cut-price ${money(fee)} \u2014 he wanted out.`,fee);
+ }else{
+   // nobody could fund him. Find a club that will take him, and make them pay what
+   // they can afford; if that is nothing, he walks for free.
+   const landed=placeReleasedYouth(p,t.id);
+   if(landed){
+     const paid=Math.max(0,Math.min(fee,Math.round(landed.budget)));
+     if(paid>0){landed.budget-=paid;t.budget+=paid;}
+     logAdd(paid>0
+       ? `Sold ${p.name} to ${landed.name} for ${money(paid)} \u2014 he wanted out.`
+       : `${p.name} joined ${landed.name} on a free \u2014 nobody would pay for a man who wanted out.`,paid);
+   }else{
+     releasePlayerToPool(p);
+     logAdd(`${p.name} left on a free \u2014 he wanted out and nobody wanted him.`);
+   }
+ }
  saveGame(true);render();
 }
 /* Promise him a run in the side: he drops the demand and gives you one season. If he
@@ -2689,7 +2966,7 @@ function financeTick(home,oppId){
  const t=T(G.userTeam);
  if(home&&G.ticketManager)G.ticketPrice=optimalTicketPrice(t,oppId);
  const att=home?attendance(t,oppId):0;
- const gate=Math.round(att*G.ticketPrice*(hasRnD("pricing")?1.15:1));
+ const gate=gateRevenue(att);
  if(home){if(gate>=500000)awardBadge("box_office");if(att>=effCapacity(t))awardBadge("sold_out");}
  const spon=sponsorWeekly(t),merch=merchWeekly(t);
  const pw=squadWage(t),sw=staffWage(),up=stadiumUpkeep(t);
@@ -2761,7 +3038,7 @@ function aiSquadTopUp(){
      const spare=squadOf(t).filter(p=>p&&p.pos==="GK").sort((a,b)=>a.ovr-b.ovr)[0];
      if(!spare)break;
      t.budget+=Math.round((spare.value||0)*0.9);
-     detachPlayer(spare);spare.team=null;G.freeAgents.push(spare.id);
+     releasePlayerToPool(spare);
    }
  });
  G.teams.forEach(t=>{
@@ -2779,10 +3056,9 @@ function aiSquadTopUp(){
      if(t.squad.length>=TARGET){
        const out=squadOf(t).filter(p=>p&&p.pos!=="GK").sort((a,b)=>a.ovr-b.ovr)[0];
        if(!out)break;
-       detachPlayer(out);out.team=null;G.freeAgents.push(out.id);
+       releasePlayerToPool(out);
      }
-     G.freeAgents=G.freeAgents.filter(x=>x!==keeper.id);
-     joinClub(keeper,t.id);keeper.team=t.id;t.squad.push(keeper.id);
+     movePlayerToClub(keeper,t);
    }
  });
  G.teams.forEach(t=>{
@@ -2819,11 +3095,7 @@ function aiSquadTopUp(){
      }
      if(!sign)break;
      t.budget-=Math.round(freeAgentFee(sign)*.6);  // AI gets a keener deal than you do
-     G.teams.forEach(tt=>{tt.squad=tt.squad.filter(id=>id!==sign.id);
-       if(tt.academy)tt.academy=tt.academy.filter(id=>id!==sign.id);
-       if(tt.unhappy)tt.unhappy=tt.unhappy.filter(id=>id!==sign.id);});
-     joinClub(sign,t.id);sign.team=t.id;t.squad.push(sign.id);
-     G.freeAgents=G.freeAgents.filter(x=>x!==sign.id);
+     movePlayerToClub(sign,t);
    }
  });
 }
@@ -2836,7 +3108,7 @@ function youthAcademyChurn(){
    if(!olds.length)return;
    const p=olds.sort((a,b)=>b.age-a.age)[0];
    t.budget+=Math.round(p.value*.9);
-   t.squad=t.squad.filter(x=>x!==p.id);p.team=null;G.freeAgents.push(p.id);
+   releasePlayerToPool(p);
  });
 }
 function sellingClubSales(){
@@ -2849,7 +3121,7 @@ function sellingClubSales(){
    if(!vets.length)return;
    const p=vets.sort((a,b)=>b.value-a.value)[0];
    t.budget+=Math.round(p.value*.9);
-   t.squad=t.squad.filter(x=>x!==p.id);p.team=null;G.freeAgents.push(p.id);
+   releasePlayerToPool(p);
    // only notable departures make the feed, pushed to the back so they do not
    // crowd out league and cup stories, and capped per season
    if((p.gc||0)>=25||p.ovr>=72){
@@ -2869,7 +3141,7 @@ function boardForcedSales(){
    const p=pool.sort((a,b)=>b.value-a.value)[0];
    const fee=Math.round(p.value*.9);
    t.budget+=fee;
-   t.squad=t.squad.filter(x=>x!==p.id);p.team=null;G.freeAgents.push(p.id);
+   releasePlayerToPool(p);
    if(G.xi)G.xi=G.xi.filter(id=>id!==p.id);
    logAdd(`The board sold ${p.name} to cover the deficit.`,fee);
    sold++;
@@ -2888,7 +3160,7 @@ function aiFinanceTick(){
    if(t.budget<0&&t.squad.length>SQUAD_MIN){
      const p=squadOf(t).sort((a,b)=>b.value-a.value)[0];
      t.budget+=Math.round(p.value*.9);
-     t.squad=t.squad.filter(x=>x!==p.id);p.team=null;G.freeAgents.push(p.id);
+     releasePlayerToPool(p);
    }
  });
 }
@@ -3000,10 +3272,9 @@ function aiTransfers(){
      ? options.sort((a,b)=>(b.pot-b.age*1.5)-(a.pot-a.age*1.5))[0]
      : options.sort((a,b)=>b.ovr-a.ovr)[0];
    t.budget+=sellFee-buy.value;
-   detachPlayer(worst);worst.team=null;G.freeAgents.push(worst.id);
-   detachPlayer(buy);G.freeAgents=G.freeAgents.filter(id=>id!==buy.id);
-   joinClub(buy,t.id);buy.team=t.id;t.squad.push(buy.id);
-   buy.wage=wageOf(buy);buy.contract=newContractYears();
+   releasePlayerToPool(worst);
+   movePlayerToClub(buy,t);
+   buy.wage=wageOf(buy);buy.contract=newContractYears();markWagesDirty();
  }
  aiClubTransfers();
 }
@@ -3040,6 +3311,69 @@ function joinClub(p,teamId,season){
 function spellStats(p,h){
  if(h.out!=null)return{goals:h.goals||0,apps:h.apps||0};
  return{goals:Math.max(0,(p.gc||0)-(h.gcAt||0)),apps:Math.max(0,(p.ac||0)-(h.acAt||0))};
+}
+/* Development-time invariant check. Every one of these was a real failure mode at some
+   point: a player on two clubs' books, a squad holding an id for a man who no longer
+   exists, a player pointing at a club that is not holding him, a duplicate free agent.
+   Run after every matchday, window action, import and season turnover in the harness. */
+function assertWorldIntegrity(where){
+ const tag=where?" ["+where+"]":"";
+ const byId=new Map();
+ G.players.forEach(p=>{
+   if(byId.has(p.id))throw new Error("duplicate player id "+p.id+tag);
+   byId.set(p.id,p);
+ });
+ const held=new Map();
+ for(const t of G.teams){
+   const entries=[...t.squad.map(id=>["squad",id]),...((t.academy||[]).map(id=>["academy",id]))];
+   for(const [bucket,id] of entries){
+     if(held.has(id))throw new Error("player "+id+" appears more than once"+tag);
+     const p=byId.get(id);
+     if(!p)throw new Error(t.name+" has missing "+bucket+" player "+id+tag);
+     if(p.team!==t.id)throw new Error(p.name+" says team "+p.team+", held by "+t.id+tag);
+     held.set(id,t.id);
+   }
+   if(t.squad.length>SQUAD_MAX)throw new Error(t.name+" over the squad cap: "+t.squad.length+tag);
+   if((t.academy||[]).length>ACADEMY_MAX)throw new Error(t.name+" over the academy cap"+tag);
+   if(!isFinite(t.budget))throw new Error(t.name+" has a non-finite budget"+tag);
+ }
+ for(const p of G.players){
+   if(p.team!=null&&held.get(p.id)!==p.team)
+     throw new Error(p.name+" points at team "+p.team+" but is not held there"+tag);
+   if(!isFinite(p.wage)||!isFinite(p.value))throw new Error(p.name+" has non-finite money"+tag);
+ }
+ const free=new Set();
+ for(const id of G.freeAgents){
+   if(free.has(id))throw new Error("duplicate free agent "+id+tag);
+   free.add(id);
+   const p=byId.get(id);
+   if(!p||p.team!=null||held.has(id))throw new Error("invalid free-agent entry "+id+tag);
+ }
+ for(const p of G.players){
+   if(p.team==null&&!free.has(p.id)&&!p.retired)
+     throw new Error(p.name+" is unattached but not on the free-agent list"+tag);
+ }
+ if(G.teams.length!==REGIONS.length*PER_TIER*3)
+   throw new Error("pyramid is "+G.teams.length+" clubs, expected "+(REGIONS.length*PER_TIER*3)+tag);
+ if(!T(G.userTeam))throw new Error("user club is missing from the world"+tag);
+ return true;
+}
+/* The assertion above throws, which is what a test wants and the last thing a player
+   wants. In the game it runs inside this guard: a broken invariant is repaired on the
+   spot and noted, rather than either crashing the career or rotting silently. Grok's
+   point stands that without this the next regression is invisible; this makes it loud
+   without making it fatal. */
+function integrityGuard(where){
+ try{assertWorldIntegrity(where);return true;}
+ catch(e){
+   const fixed=repairWorld();
+   G._integrityRepairs=(G._integrityRepairs||0)+1;
+   G._lastIntegrityFault=String(e&&e.message||e);
+   try{assertWorldIntegrity(where+" post-repair");}
+   catch(e2){G._lastIntegrityFault="unrepaired: "+String(e2&&e2.message||e2);}
+   if(fixed)logAdd(`${fixed} player${fixed===1?"":"s"} were found in an inconsistent state and returned to the free market.`);
+   return false;
+ }
 }
 function detachPlayer(p){
  G.teams.forEach(tt=>{
@@ -3084,10 +3418,9 @@ function aiClubTransfers(){
      d.fee<=buyer.budget);
    if(!deal||squadFull(buyer))continue;
    buyer.budget-=deal.fee;deal.sel.budget+=deal.fee;
-   detachPlayer(deal.p);
-   joinClub(deal.p,buyer.id);deal.p.team=buyer.id;buyer.squad.push(deal.p.id);
+   movePlayerToClub(deal.p,buyer);
    deal.p.wage=wageOf(deal.p);deal.p.contract=newContractYears();
-   delete deal.p.unhappySince;
+   markWagesDirty();
    done++;
  }
 }
@@ -3164,7 +3497,7 @@ function cupUserRecord(md,gf,ga,pens){
      const t=userTeamObj();
      if(G.ticketManager)G.ticketPrice=optimalTicketPrice(t,g.opp,stage==null?0:stage);
      const att=attendance(t,g.opp,stage==null?0:stage);
-     const gate=att*G.ticketPrice;
+     const gate=gateRevenue(att);
      t.budget+=gate;
      logAdd(`${CUP} home gate: ${att.toLocaleString()} attended.`,gate);
    }
@@ -3264,13 +3597,19 @@ function endSeason(){
    while(t.budget<0&&t.squad.length>SQUAD_MIN){
      const p=squadOf(t).sort((a,b)=>b.value-a.value)[0];
      t.budget+=Math.round(p.value*.9);
-     t.squad=t.squad.filter(x=>x!==p.id);p.team=null;G.freeAgents.push(p.id);
+     releasePlayerToPool(p);
    }
  });
  // record league + cup titles
  REGIONS.forEach(r=>{const ch=RT[r.key][0][0];ch.leagueTitles++;
    (ch.leagueTitleSeasons=ch.leagueTitleSeasons||[]).push(G.season);});
  if(G.cup&&G.cup.winner!==null)T(G.cup.winner).cupTitles++;
+ // Other regions' cups are decided HERE, before promotion, relegation and expulsion.
+ // RT is a snapshot of team objects taken at the final whistle. Simulating afterwards
+ // meant a club that had just been thrown out of the pyramid could still lift its
+ // regional cup, because the bracket never checked that the club still existed.
+ {const ureg2=userRegionKey();
+  REGIONS.forEach(r=>{if(r.key!==ureg2)simulateRegionalCup(r.key,RT);});}
  updatePrestige(RT);
  // promotion / relegation within each region (2 up / 2 down; bottom 2 of tier2 -> expansion)
  REGIONS.forEach(r=>{
@@ -3287,12 +3626,23 @@ function endSeason(){
      G.userSurvived=true;
    }
    dropSet.forEach(t=>{
+     // Seniors AND academy go back to the pool first. Missing the academy left ~1,200
+     // ghosts per long career: p.team pointed at an id that an incoming expansion club
+     // would later reuse, so they were invisible, unsellable and unculled while still
+     // showing up in fame and international selection.
+     releaseClubPlayers(t);
+     if(G.scouted)delete G.scouted[t.id];
+     if(G.refused)delete G.refused[t.id];
+     if(G.saga&&(G.saga.fromClub===t.id||(G.saga.suitors||[]).includes(t.id))){
+       if(G.saga.fromClub===t.id)G.saga=null;
+       else G.saga.suitors=G.saga.suitors.filter(x=>x!==t.id);
+     }
+     if(Array.isArray(G.offers))G.offers=G.offers.filter(o=>o.from!==t.id&&o.club!==t.id&&o.teamId!==t.id);
      G.teams=G.teams.filter(x=>x.id!==t.id);
      G.expansion.push({id:t.id,region:r.key,name:t.name,inPool:true,
        leagueTitles:t.leagueTitles,cupTitles:t.cupTitles,contTitles:t.contTitles||0,
        leagueTitleSeasons:t.leagueTitleSeasons||[],
        prestige:Math.round((t.prestige||10)*.8),trait:t.trait});
-     t.squad.forEach(pid=>{const p=P(pid);if(p){p.team=null;G.freeAgents.push(pid)}});
    });
    rebuildTeamIndex();
    const incoming=shuffle(G.expansion.filter(e=>e.inPool&&e.region===r.key)).slice(0,2);
@@ -3412,9 +3762,7 @@ function endSeason(){
  {const ut=userTeamObj();
   if(ut){if((ut.facility||0)>0)ut.facilityMaint="pending";if(ut.jet)ut.jetMaint="pending";}}
  aiFacilitiesTick();
- // simulate cups for the other two regions so cupTitles stay accurate
- {const ureg2=userRegionKey();
-  REGIONS.forEach(r=>{if(r.key!==ureg2)simulateRegionalCup(r.key,RT);});}
+ // (other regions' cups were decided before promotion/relegation, further up)
  if(G.contLive&&G.contLive.finished){/* played round by round already */}
  else runContinentalCup(RT);
  delete G.contLive;
@@ -3611,8 +3959,10 @@ function simulateRegionalCup(regionKey,RT){
  // Quick single-elimination for non-user regions so cupTitles stay accurate.
  // 30 clubs → seed by position points, run knockout rounds to a winner.
  const clubs=[];
- [0,1,2].forEach(tier=>RT[regionKey][tier].forEach((t,i)=>
-   clubs.push({t,seed:t.st.Pts+(2-tier)*100})));
+ // Belt and braces: RT is a snapshot, so verify each entry is still a live club.
+ [0,1,2].forEach(tier=>RT[regionKey][tier].forEach((t,i)=>{
+   if(!t||!T(t.id))return;
+   clubs.push({t:T(t.id),seed:t.st.Pts+(2-tier)*100});}));
  clubs.sort((a,b)=>b.seed-a.seed);
  let alive=clubs.map(c=>c.t);
  // pad to next power of 2 with byes (already 30, so 32 with 2 byes)
@@ -3651,7 +4001,7 @@ function contQualifiers(RT){
 function contPlayRound(st){
  // one knockout round: every tie in it, the user's included
  if(st.finished)return;
- if(!st.userOut&&G.coachAuto&&coachTier()>0)coachRunSetup();   // a delegated coach preps the cup side too
+ if(!st.userOut&&G.coachAuto&&coachTier()>0){coachRunSetup();G._coachPlanKey=coachPlanKey();}   // a delegated coach preps the cup side too
  const rn=CONT_ROUNDS[Math.min(st.round,3)];
  st.lastRound={name:rn,lines:[]};
  const next=[];
@@ -3910,23 +4260,10 @@ function ageAndRenew(){
  });
  // soft cap: if the pool drifted above target, retire surplus unattached free agents.
  // Headroom accounts for the ~20-man academies every club now runs.
- const TARGET=REGIONS.length*1000;
- if(G.players.length>TARGET){
-   const cutN=G.players.length-TARGET;
-   // anything still referenced by a club is off-limits, so a cull can never leave a
-   // squad or academy pointing at a deleted player
-   const held=new Set();
-   G.teams.forEach(t=>{t.squad.forEach(id=>held.add(id));(t.academy||[]).forEach(id=>held.add(id));});
-   const cuttable=G.freeAgents.map(P).filter(p=>p&&!held.has(p.id))
-     .sort((a,b)=>(b.age-a.age)||(a.ovr-b.ovr));   // oldest, weakest first
-   const cut=new Set(cuttable.slice(0,cutN).map(p=>p.id));
-   if(cut.size){
-     G.players=G.players.filter(p=>!cut.has(p.id));
-     G.freeAgents=G.freeAgents.filter(id=>!cut.has(id));
-   }
- }
  academyTick();
- rebuildIndex();
+ cullSurplusPlayers();
+ integrityGuard("season turnover");   // AFTER the intake, or the cull measures a world that is about
+ rebuildIndex();         // to grow by ~1,600 academy players and under-trims every time
 }
 /* Academies turn over each season: anyone who has aged out (23+) must be promoted into
    a senior slot or leaves the club, and clubs intake fresh 16-year-olds to refill. AI
@@ -4026,16 +4363,59 @@ const RND_PROJECTS={
    its exact chance. The gamble should be honest, not obscure. */
 const RND_OFFER_COUNT=3;
 function rndState(){
- if(!G.rnd)G.rnd={done:{},failed:{},active:[],offers:[]};
+ if(!G.rnd)G.rnd={done:{},failed:{},active:[],offers:[],history:[]};
  if(!G.rnd.done)G.rnd.done={};
  if(!G.rnd.failed)G.rnd.failed={};
  if(!Array.isArray(G.rnd.active))G.rnd.active=[];
  if(!Array.isArray(G.rnd.offers))G.rnd.offers=[];
+ // A permanent record of every project ever commissioned and how it turned out. A
+ // failure used to leave one line in the finance log and nothing else, so a president
+ // could sink hundreds of millions into the lab across a career with no way to look
+ // back at what he had bought and what had burned.
+ if(!Array.isArray(G.rnd.history)){
+   G.rnd.history=[];
+   // backfill for careers that predate the record: successes carry their season,
+   // failures only ever stored a count, so those are logged without one
+   Object.keys(G.rnd.done).forEach(k=>{
+     if(RND_PROJECTS[k])G.rnd.history.push({key:k,season:G.rnd.done[k],ok:true,cost:null});
+   });
+   Object.keys(G.rnd.failed).forEach(k=>{
+     if(!RND_PROJECTS[k])return;
+     for(let i=0;i<G.rnd.failed[k];i++)G.rnd.history.push({key:k,season:null,ok:false,cost:null});
+   });
+   G.rnd.history.sort((a,b)=>(a.season||0)-(b.season||0));
+ }
  return G.rnd;
+}
+/* Everything the president has ever spent in the lab, and what he got for it. */
+function rndLedger(){
+ const h=rndState().history;
+ let spent=0,landed=0,burned=0,known=0;
+ h.forEach(e=>{
+   if(e.cost!=null){spent+=e.cost;known++;if(!e.ok)burned+=e.cost;}
+   if(e.ok)landed++;
+ });
+ return{spent,landed,burned,attempts:h.length,costKnown:known};
 }
 function hasRnD(key){const r=G&&G.rnd;return !!(r&&r.done&&r.done[key]);}
 function rndActive(key){return rndState().active.some(a=>a.key===key);}
 /* Each failure makes the next attempt at that project a quarter dearer. */
+/* Expected total spend before a project lands, counting the attempts that fail AND the
+   fact that each failure raises the price of the next go. The old cost/chance formula
+   assumed every attempt cost the same, which understated the 12% projects by ~60%. */
+function rndExpectedSpend(key){
+ const p=RND_PROJECTS[key];if(!p)return 0;
+ const chance=clamp(p.chance,0.001,1);
+ const fails0=Math.min(6,(rndState().failed[key]||0));
+ let e=0,surv=1;
+ for(let n=0;n<400;n++){
+   const step=Math.min(6,fails0+n);
+   e+=surv*IN(Math.round(p.cost*Math.pow(1.12,step)));
+   surv*=(1-chance);
+   if(surv<1e-9)break;
+ }
+ return Math.round(e);
+}
 function rndCost(key){
  const p=RND_PROJECTS[key];if(!p)return 0;
  // Each failure raises the price of trying again, but gently and with a ceiling: with
@@ -4049,6 +4429,43 @@ function rndDrawOffers(){
  const pool=Object.keys(RND_PROJECTS).filter(k=>!r.done[k]&&!rndActive(k));
  r.offers=shuffle(pool.slice()).slice(0,RND_OFFER_COUNT);
 }
+/* The moment a project resolves, win or lose, gets its own card. A three-season gamble
+   that ends in a line of finance-log text is not a result, it is a rounding error, and
+   the failures are exactly the ones a president needs to see clearly. */
+function rndShowVerdicts(){
+ const v=G.rndVerdicts;
+ if(!v||!v.length)return;
+ G.rndVerdicts=[];
+ const ov=$(`<div class="overlay"></div>`);
+ const box=$(`<div class="pcard"></div>`);
+ const wins=v.filter(x=>x.ok).length,losses=v.length-wins;
+ box.appendChild($(`<div class="row"><h3 style="font-size:17px">\uD83E\uDDEA From the lab</h3>
+   <span class="small muted">Season ${v[0].season}</span></div>
+   <div class="small muted" style="margin-top:2px">${v.length} project${v.length===1?"":"s"} reported back${wins&&losses?` \u00B7 ${wins} landed, ${losses} failed`:""}.</div>`));
+ v.forEach(x=>{
+   const p=RND_PROJECTS[x.key];if(!p)return;
+   box.appendChild($(`<div class="divider"></div>`));
+   if(x.ok){
+     box.appendChild($(`<div class="small" style="margin-bottom:3px"><b class="gold">\u2713 ${p.name} WORKED</b></div>
+       <div class="small" style="margin-bottom:3px">${p.effect}</div>
+       <div class="small muted">This is permanent. It applies from now until the end of your time at the club.</div>`));
+   }else{
+     box.appendChild($(`<div class="small" style="margin-bottom:3px"><b style="color:var(--loss)">\u2717 ${p.name} FAILED</b></div>
+       <div class="small" style="margin-bottom:3px">${money(x.cost)} written off. Nothing was learned, nothing was salvaged.</div>
+       <div class="small muted">It returns to the board eventually. The next attempt will cost 12% more.</div>`));
+   }
+ });
+ const led=rndLedger();
+ box.appendChild($(`<div class="divider"></div>`));
+ box.appendChild($(`<div class="logline"><span class="muted">Projects commissioned</span><span>${led.attempts}</span></div>
+   <div class="logline"><span class="muted">Landed</span><span class="gold">${led.landed}</span></div>
+   <div class="logline"><span class="muted">Written off</span><span class="injtag">${money(led.burned)}</span></div>`));
+ const cl=$(`<button class="btn" style="margin-top:12px">Understood</button>`);
+ cl.onclick=()=>{ov.remove();render()};
+ box.appendChild(cl);
+ ov.appendChild(box);
+ document.body.appendChild(ov);
+}
 /* A president should be able to read the whole case for a project - what it does, what
    it is worth to HIS club specifically, what it competes with for the same money, and
    what happens when it fails - without having to tap a button labelled Commission to
@@ -4058,7 +4475,7 @@ function rndDetails(key){
  const t=userTeamObj();if(!t)return;
  const r=rndState();
  const cost=rndCost(key),fails=r.failed[key]||0,odds=Math.round(p.chance*100);
- const expected=Math.round(cost/p.chance);
+ const expected=rndExpectedSpend(key);
  const done=!!r.done[key],running=rndActive(key);
  const canPay=t.budget>=cost;
  const ov=$(`<div class="overlay"></div>`);
@@ -4133,7 +4550,19 @@ function rndTick(){
    a.seasonsLeft--;
    if(a.seasonsLeft>0){still.push(a);return;}
    const p=RND_PROJECTS[a.key];if(!p)return;
-   if(Math.random()<a.chance){
+   const worked=Math.random()<a.chance;
+   r.history.push({key:a.key,season:G.season,ok:worked,cost:a.cost,started:a.started});
+   // Both outcomes get a news item and a flagged verdict. A failure used to produce a
+   // single finance-log line that scrolled away inside the season turnover, so the
+   // money simply vanished with no moment attached to it.
+   // Only ever holds the current season's results. The UI drains this when it shows the
+   // verdict card, but if that never runs (quit before dismissing, a load mid-turnover)
+   // the queue would otherwise accumulate every result of a whole career and then dump
+   // them all at once.
+   if(!Array.isArray(G.rndVerdicts))G.rndVerdicts=[];
+   G.rndVerdicts=G.rndVerdicts.filter(x=>x.season===G.season);
+   G.rndVerdicts.push({key:a.key,ok:worked,cost:a.cost,season:G.season});
+   if(worked){
      r.done[a.key]=G.season;
      logAdd(`${p.name} WORKED. ${p.effect}`);
      G.news&&G.news.unshift({season:G.season,text:`${userTeamObj().name} unveil ${p.name}, the first of its kind in the game.`});
@@ -4143,12 +4572,32 @@ function rndTick(){
      if(won>=6)awardBadge("the_future");
    }else{
      r.failed[a.key]=(r.failed[a.key]||0)+1;
-     logAdd(`${p.name} came to nothing. ${money(a.cost)} written off.`);
+     logAdd(`${p.name} came to nothing. ${money(a.cost)} written off.`,-0);
+     G.news&&G.news.unshift({season:G.season,text:`${userTeamObj().name} quietly wind up the ${p.name} project after ${money(a.cost)} and nothing to show for it.`});
      awardBadge("moonshot_failed");
    }
  });
  r.active=still;
  rndDrawOffers();
+}
+/* Soft population cap. Only unattached players can go, so this can never leave a squad
+   or an academy pointing at a deleted man. Target is derived from what the world can
+   actually hold: a flat 3,000 sat below the 3,420 that 90 clubs at a 20-man cap with
+   academies refilling toward 18 will hold on their own, so the cull was fighting the
+   game's own configuration and starving the transfer market to do it. */
+function cullSurplusPlayers(){
+ const TARGET=playerPopulationTarget();
+ if(G.players.length<=TARGET)return 0;
+ const cutN=G.players.length-TARGET;
+ const held=new Set();
+ G.teams.forEach(t=>{t.squad.forEach(id=>held.add(id));(t.academy||[]).forEach(id=>held.add(id));});
+ const cuttable=G.freeAgents.map(P).filter(p=>p&&!held.has(p.id))
+   .sort((a,b)=>(b.age-a.age)||(a.ovr-b.ovr));   // oldest, weakest first
+ const cut=new Set(cuttable.slice(0,cutN).map(p=>p.id));
+ if(!cut.size)return 0;
+ G.players=G.players.filter(p=>!cut.has(p.id));
+ G.freeAgents=G.freeAgents.filter(id=>!cut.has(id));
+ return cut.size;
 }
 function academyTick(){
  G.teams.forEach(t=>{
@@ -4179,6 +4628,7 @@ function academyTick(){
      const kid=newPlayer(G.nextPid++,pos,16,t.region);
      // genomic screening: your intake is selected for ceiling, not for what he can do now
      if(t.id===G.userTeam&&hasRnD("dna")){kid.pot=clamp(kid.pot+ri(6,13),20,99);setOvr(kid);kid.value=valueOf(kid);}
+     kid.academyClubId=t.id;kid.academyGraduate=false;
      joinClub(kid,t.id);kid.team=t.id;t.academy.push(kid.id);G.players.push(kid);
    }
  });
@@ -4272,8 +4722,11 @@ function userStartXI(){
  if(xi.length<11){const used=new Set(xi.map(p=>p.id));
    fit(squadOf(userTeamObj())).filter(p=>!used.has(p.id)).sort((a,b)=>b.ovr-a.ovr)
      .forEach(p=>{if(xi.length<11)xi.push(p)});}
+ // The old final pass swept up the whole squad regardless of fitness, so a treatment
+ // room full of injuries still produced eleven names. Fit academy players are the last
+ // legitimate source; after that the club plays short and strength() charges for it.
  if(xi.length<11){const used=new Set(xi.map(p=>p.id));
-   squadOf(userTeamObj()).filter(p=>!used.has(p.id)).sort((a,b)=>b.ovr-a.ovr)
+   fit(academyOf(userTeamObj())).filter(p=>!used.has(p.id)).sort((a,b)=>b.ovr-a.ovr)
      .forEach(p=>{if(xi.length<11)xi.push(p)});}
  return xi;
 }
@@ -4294,6 +4747,13 @@ function canSeePot(teamId){
  if(teamId===G.userTeam)return true;
  if(hasRnD("scouting"))return true;      // the model reads every player in the world
  return isScouted(teamId)&&scoutInfo().pot;
+}
+/* Every displayed price, every affordability check and every actual charge must be the
+   same number. Transfer Market Analytics was being applied in buyPlayer() only, so the
+   market and world screens quoted the full fee and disabled the Buy button on it, which
+   could stop a club bidding for a player it could in fact afford. */
+function effectiveTransferFee(p){
+ return Math.round(transferFee(p)*(hasRnD("negotiation")?0.88:1));
 }
 function buyScout(teamId){
  const cost=scoutCost();const t=userTeamObj();
@@ -4372,7 +4832,7 @@ function buyPlayer(p){
  const t=userTeamObj();
  if(!inWindow())return toast("Trades only happen in the pre-season window.");
  if(p.team===null)return signPlayer(p);
- const fee=Math.round(transferFee(p)*(hasRnD("negotiation")?0.88:1));
+ const fee=effectiveTransferFee(p);
  if(inTheRed())return toast("Signings are frozen while the club is in the red.");
  if(t.budget<fee)return toast(`Need ${money(fee)} for this transfer.`);
  if(t.squad.length>=SQUAD_MAX)return toast(`Squad is full (${SQUAD_MAX} max). Sell or release a player to make room.`);
@@ -4395,9 +4855,7 @@ function buyPlayer(p){
    saveGame(true);render();return;
  }
  t.budget-=fee;seller.budget+=fee;
- detachPlayer(p);
- p.team=t.id;t.squad.push(p.id);
- joinClub(p,t.id);
+ movePlayerToClub(p,t);
  if(fee>=100000000)awardBadge("big_spender");
  p.wage=wageOf(p);p.contract=newContractYears();delete p.demand;delete p.runningDown;
  {const bs=G.badgeStats||(G.badgeStats={});
@@ -4433,7 +4891,7 @@ function aiFundAndMakeRoom(t,exceptId){
      .sort((a,b)=>a.ovr-b.ovr)[0];
    if(!out)break;
    t.budget+=Math.round(transferFee(out)*0.85);
-   detachPlayer(out);out.team=null;G.freeAgents.push(out.id);
+   releasePlayerToPool(out);
  }
 }
 function genOffers(){
@@ -4530,8 +4988,9 @@ function acceptOffer(o){
  t.budget+=o.fee;buyer.budget-=o.fee;
  {const bs=G.badgeStats||(G.badgeStats={});bs.windowSales=(bs.windowSales||0)+1;
   if(bs.windowSales>=3)awardBadge("fire_sale");}
- t.squad=t.squad.filter(x=>x!==p.id);joinClub(p,buyer.id);p.team=buyer.id;buyer.squad.push(p.id);
+ movePlayerToClub(p,buyer);
  p.wage=wageOf(p);p.contract=newContractYears();delete p.demand;delete p.runningDown;
+ markWagesDirty();
  aiFundAndMakeRoom(buyer,p.id);   // buyer sells fringe to cover the fee and open a slot
  if(t.unhappy)t.unhappy=t.unhappy.filter(x=>x!==p.id);delete p.unhappySince;
  if(G.xi)G.xi=G.xi.filter(id=>id!==p.id);
@@ -4562,7 +5021,10 @@ function toast(msg){
 function showPlayer(id){
  const p=P(id);if(!p)return;
  const owned=p.team===G.userTeam;
- const hasScout=(G.scoutTier!=null);
+ // Predictive Scouting counts as full access here. Gating on a hired scout alone meant
+ // the research project a president had just spent hundreds of millions on still left
+ // the market showing "?" for potential and telling him to hire a scout.
+ const hasScout=(G.scoutTier!=null)||hasRnD("scouting");
  const club=p.team===null?"Free agent":T(p.team).name;
  const bars=attrsFor(p.pos).map(a=>`<div class="arow"><span class="al">${a}</span><span class="abar"><div style="width:${p[a]}%"></div></span><span class="av">${p[a]}</span></div>`).join("");
  const ov=$(`<div class="overlay"></div>`);
@@ -4618,7 +5080,7 @@ function showPlayer(id){
      <span>Wage: <b>${money(p.team==null?freeAgentWage(p):p.wage)}/wk</b>${p.team==null&&isMarquee(p)?' <span class="gold small">asking</span>':''}</span>
    </div>
    ${p.susp>0?'<div class="small" style="margin-top:8px"><span class="injtag">SUSPENDED</span> Misses the next match.</div>':''}
-   ${p.natDuty?`<div class="small" style="margin-top:8px"><span class="injtag">INTERNATIONAL DUTY</span> Away with ${p.country||"his country"} \u2014 unavailable for the next match.${p.natCaps?` ${p.natCaps} call-up${p.natCaps===1?"":"s"} in his career.`:""}</div>`:''}
+   ${p.natDuty?`<div class="small" style="margin-top:8px"><span class="injtag">INTERNATIONAL DUTY</span> Away with ${p.nat||"his country"} \u2014 unavailable for the next match.${p.natCaps?` ${p.natCaps} call-up${p.natCaps===1?"":"s"} in his career.`:""}</div>`:''}
    ${p.team===G.userTeam?'<button class="btn sec" data-relmodal="'+p.id+'" style="margin-top:12px">Release from contract</button>':''}
    ${p.age>=40?'<div class="small" style="margin-top:8px"><span class="ret">R</span> Final season. Retires at year\u2019s end.</div>':''}
    <button class="btn sec" style="margin-top:14px">Close</button></div>`));
@@ -4660,6 +5122,16 @@ function render(){
    <div class="t"><h1>Empire FC 2</h1>
    <div class="sub">Season ${G.season} \u00B7 Matchday ${Math.min(G.matchday+1,SEASON_LEN)}/${SEASON_LEN} \u00B7 ${G.owner}</div></div></header>`));
  const wrap=$(`<div class="wrap"></div>`);
+ // A standing warning when the browser has stopped accepting the autosave. Until now a
+ // silent autosave failed silently, so a player could keep going for hours believing
+ // the career was being written down.
+ if(G.saveError){
+   const sw=$(`<div class="card" style="border-color:var(--loss)">
+     <div class="small"><b style="color:var(--loss)">Progress is not being saved.</b>
+     Your browser refused the last save \u2014 storage may be full or blocked.
+     Export a backup now, from the Office, before you lose the career.</div></div>`);
+   wrap.appendChild(sw);
+ }
  ({club:viewClub,squad:viewSquad,league:viewLeague,cup:viewCup,transfers:viewTransfers,
    world:viewWorld,office:viewOffice}[TAB])(wrap);
  app.appendChild(wrap);
@@ -5027,7 +5499,9 @@ function viewClub(w){
      if(G.lastCont)setTimeout(()=>toast(`${CONT_CUP}: ${G.lastCont.winner} champions${G.lastCont.qualified?" \u00B7 you qualified":""}.`),600);
      if(G.lastWC&&G.lastWC.season===G.season-1)setTimeout(()=>toast(`\u2691 World Cup won by ${G.lastWC.champion}!`),1200);
      if(G.lastTippy&&G.lastTippy.season===G.season-1)setTimeout(()=>toast(`\u2728 Tippy Cup won by ${G.lastTippy.champion}!`),1400);
-     render()};
+     render();
+     // after the season's toasts, the lab reports back with its own card
+     if((G.rndVerdicts||[]).length)setTimeout(rndShowVerdicts,1600);};
    const roundFeedback=()=>{const lr=G.contLive&&G.contLive.lastRound;
      const mine=lr&&lr.lines.find(l=>l.user);if(!mine)return;
      if(mine.won)toast(G.contLive.finished?`CHAMPIONS! The ${CONT_CUP.replace("The ","")} is yours!`:`Through! ${mine.line}`);
@@ -5134,7 +5608,13 @@ function viewSquad(w){
  const delegated=ctier>0&&G.coachAuto;
  // When delegated, show exactly the side he will field, and lock only the
  // controls he governs at his tier: the XI always, the shape at 2+, dials at 3.
- if(delegated)coachRunSetup();
+ //
+ // This used to call coachRunSetup() on every render. Opening the screen, switching a
+ // tab or triggering any rerender therefore re-picked the team: with a Rotator, twelve
+ // renders produced five different starting elevens, and an elite coach ran thousands
+ // of tactical evaluations each time. The plan is now made at explicit moments
+ // (delegation switched on, matchday kickoff, cup kickoff) and merely displayed here.
+ if(delegated)coachEnsurePlan();
  const lockForm=delegated&&ctier>=2;
  const lockDials=delegated&&ctier>=3;
  const lockXI=delegated;
@@ -5151,7 +5631,7 @@ function viewSquad(w){
      :`You are picking the side yourself. Switch the coach on and he handles the XI${ctier>=2?', shape':''}${ctier>=3?' and tactics':''} before every match automatically.`}</div>`));
    dc.querySelector("button").onclick=()=>{
      G.coachAuto=!G.coachAuto;
-     if(G.coachAuto)coachRunSetup();
+     if(G.coachAuto){coachRunSetup();G._coachPlanKey=coachPlanKey();}
      toast(G.coachAuto?`${_c.name} will run the team.`:"You have taken control of team selection.");
      saveGame(true);render();
    };
@@ -5513,7 +5993,10 @@ function viewTransfers(w){
  }
 
  // free agents / scouted players tabbed section
- const hasScout=(G.scoutTier!=null);
+ // Predictive Scouting counts as full access here. Gating on a hired scout alone meant
+ // the research project a president had just spent hundreds of millions on still left
+ // the market showing "?" for potential and telling him to hire a scout.
+ const hasScout=(G.scoutTier!=null)||hasRnD("scouting");
  const scoutedTeamIds=Object.keys(G.scouted||{}).filter(k=>G.scouted[k]&&T(+k));
  const scoutedPlayers=scoutedTeamIds.flatMap(k=>squadOf(T(+k))).filter(p=>p&&p.team!==G.userTeam);
  const mc=$(`<div class="card"></div>`);
@@ -5584,10 +6067,10 @@ function signPlayer(p){
  // but he walks in as the best paid player at the club by a distance.
  if(isMarquee(p)&&askedWage*SEASON_LEN>Math.max(t.budget,0)*2.5)
    return toast(`${p.name} wants ${money(askedWage)}/wk. Your board will not sanction it.`);
- t.budget-=faFee;G.freeAgents=G.freeAgents.filter(x=>x!==p.id);
- p.team=t.id;t.squad.push(p.id);
+ t.budget-=faFee;
+ movePlayerToClub(p,t);
  p.wage=askedWage;p.contract=newContractYears();delete p.demand;delete p.runningDown;
- joinClub(p,t.id);
+ markWagesDirty();
  if(isMarquee(p))logAdd(`${p.name} signs on a free \u2014 ${money(askedWage)}/wk makes him your highest earner.`);
  {const bs=G.badgeStats||(G.badgeStats={});
   bs.faSigns=(bs.faSigns||0)+1;if(bs.faSigns>=10)awardBadge("free_agent_king");
@@ -5603,9 +6086,7 @@ function releasePlayer(p){
  if(t.squad.length<=SQUAD_MIN)return toast(`Cannot go below ${SQUAD_MIN} players.`);
  if(p.pos==="GK"&&squadOf(t).filter(x=>x.pos==="GK").length<=2)return toast("Keep at least 2 keepers.");
  if(!confirm(`Release ${p.name}? They leave for free and their wage comes off the books.`))return;
- t.squad=t.squad.filter(x=>x!==p.id);p.team=null;G.freeAgents.push(p.id);
- if(t.unhappy)t.unhappy=t.unhappy.filter(x=>x!==p.id);delete p.unhappySince;
- if(G.xi)G.xi=G.xi.filter(id=>id!==p.id);
+ releasePlayerToPool(p);
  G.badgeStats=G.badgeStats||{};G.badgeStats.releasedThisSeason=true;
  logAdd(`Released ${p.name}.`);
  toast(`${p.name} released.`);saveGame(true);render();
@@ -5726,7 +6207,7 @@ function viewOffice(w){
     lab.appendChild($(`<div class="small" style="margin-bottom:4px"><b>In development</b></div>`));
     r.active.forEach(a=>{
       const p=RND_PROJECTS[a.key];if(!p)return;
-      const row=$(`<div class="logline"><span>${p.name}</span><span class="muted">${a.seasonsLeft} season${a.seasonsLeft===1?"":"s"} left \u00B7 ~${Math.round(a.chance*100)}%</span></div>`);
+      const row=$(`<div class="logline"><span>${p.name}</span><span class="muted">reports in S${G.season+a.seasonsLeft} \u00B7 ~${Math.round(a.chance*100)}%</span></div>`);
       row.style.cursor="pointer";row.onclick=()=>rndDetails(a.key);
       lab.appendChild(row);
     });
@@ -5742,6 +6223,33 @@ function viewOffice(w){
     });
   }
 
+  // ---- Research record ----
+  // Every project ever commissioned, and what it came to. Failures were previously
+  // invisible the moment their finance-log line scrolled away, which made the lab feel
+  // like it only ever produced wins and hid what the gamble had actually cost.
+  if(r.history.length){
+    const led=rndLedger();
+    lab.appendChild($(`<div class="divider"></div>`));
+    const head=$(`<div class="row" style="cursor:pointer"><div class="small"><b>Research record</b></div>
+      <span class="small muted">${led.attempts} commissioned \u00B7 ${led.landed} landed${led.burned?` \u00B7 ${money(led.burned)} written off`:""} \u25BE</span></div>`);
+    const body=$(`<div style="margin-top:6px"></div>`);
+    body.style.display=G._rndRecordOpen?"block":"none";
+    head.onclick=()=>{G._rndRecordOpen=!G._rndRecordOpen;
+      body.style.display=G._rndRecordOpen?"block":"none";};
+    r.history.slice().reverse().forEach(e=>{
+      const p=RND_PROJECTS[e.key];if(!p)return;
+      const when=e.season!=null?`S${e.season}`:"earlier";
+      const cost=e.cost!=null?` \u00B7 ${money(e.cost)}`:"";
+      const row=$(`<div class="logline"><span>${e.ok?'<b class="gold">\u2713</b>':'<b style="color:var(--loss)">\u2717</b>'} ${p.name}</span>
+        <span class="muted">${when}${cost}</span></div>`);
+      row.style.cursor="pointer";row.onclick=()=>rndDetails(e.key);
+      body.appendChild(row);
+    });
+    if(led.costKnown<led.attempts)
+      body.appendChild($(`<div class="small muted" style="margin-top:6px">Projects from before your club started keeping a research ledger are listed without a price.</div>`));
+    lab.appendChild(head);lab.appendChild(body);
+  }
+
   if(!inWindow()){
     lab.appendChild($(`<div class="small muted" style="margin-top:8px">New projects can only be commissioned during the pre-season window.</div>`));
   }else if(!r.offers.length){
@@ -5755,7 +6263,7 @@ function viewOffice(w){
       const odds=Math.round(p.chance*100);
       box.appendChild($(`<div class="row"><b class="gold">${p.name}</b><span class="small ${odds>=25?"gold":"injtag"}">${odds}% chance</span></div>
         <div class="small" style="margin-top:3px">${p.effect}</div>
-        <div class="small muted" style="margin-top:3px">${money(cost)} \u00B7 ${p.years} season${p.years===1?"":"s"} \u00B7 ${money(Math.round(cost/p.chance))} expected before it lands${fails?` \u00B7 <span class="injtag">failed ${fails}\u00D7</span>`:""}</div>`));
+        <div class="small muted" style="margin-top:3px">${money(cost)} \u00B7 ${p.years} season${p.years===1?"":"s"} \u00B7 ${money(rndExpectedSpend(k))} expected before it lands${fails?` \u00B7 <span class="injtag">failed ${fails}\u00D7</span>`:""}</div>`));
       const row=$(`<div class="row" style="gap:6px;margin-top:8px"></div>`);
       const det=$(`<button class="btn sm sec" style="flex:1">Details</button>`);
       det.onclick=()=>rndDetails(k);
@@ -6332,11 +6840,11 @@ function viewWorldTeam(w,id){
  const sInfo=scoutInfo();
  if(!seen){
    const sc=$(`<div class="card center"></div>`);
-   sc.appendChild($(`<div class="small" style="margin-bottom:8px">Their squad is hidden. Scout them to reveal the roster${sInfo.pot?" and player potential":""} for the rest of this season.</div>`));
+   sc.appendChild($(`<div class="small" style="margin-bottom:8px">Their squad is hidden. Scout them to reveal the roster${canSeePot(id)?" and player potential":""} for the rest of this season.</div>`));
    const b=$(`<button class="btn">Scout squad \u00B7 ${money(IN(sInfo.cost))}</button>`);
-   b.disabled=userTeamObj().budget<sInfo.cost;
+   b.disabled=userTeamObj().budget<IN(sInfo.cost);
    b.onclick=()=>buyScout(id);sc.appendChild(b);
-   if(!sInfo.pot)sc.appendChild($(`<div class="small muted" style="margin-top:6px">Without a scout on staff you can see names and ratings, but not potential. Hire a Bronze, Silver or Gold scout in the Office.</div>`));
+   if(!canSeePot(id))sc.appendChild($(`<div class="small muted" style="margin-top:6px">Without a scout on staff you can see names and ratings, but not potential. Hire a Bronze, Silver or Gold scout in the Office.</div>`));
    w.appendChild(sc);
    return;
  }
@@ -6346,9 +6854,9 @@ function viewWorldTeam(w,id){
  const rc=$(`<div class="card"></div>`);
  rc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">Squad</h3>
    <div class="small muted" style="margin-bottom:6px">Fees scale with rating, age and potential. ${open?`Window Day ${G.window.day} of 3 \u00B7 no limit on approaches.`:"Buying opens in the pre-season window."}</div>`));
- const showPot=sInfo.pot;
+ const showPot=canSeePot(id);
  const rows=squadOf(t).sort((a,b)=>b.ovr-a.ovr).map(p=>{
-   const fee=transferFee(p);
+   const fee=effectiveTransferFee(p);
    const can=open&&userTeamObj().budget>=fee&&userTeamObj().squad.length<SQUAD_MAX;
    return `<tr><td class="l">${famePill(p)}<span class="pname${isIcon(p)?' goat':''}" data-p="${p.id}">${p.name}</span></td>`+
      `<td><span class="pos ${p.pos}">${p.pos}</span></td><td>${ageCell(p)}</td>`+
