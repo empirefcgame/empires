@@ -1624,6 +1624,8 @@ function playMatchday(){
    }
  });
  G.lastResults=out;G.matchday++;
+ checkFormBadges();
+ leagueResultToast();
  awardBadge("first_whistle");
  if(G.lastScorers&&G.lastScorers.mine&&G.lastScorers.mine.length){
    awardBadge("first_goal");
@@ -1725,7 +1727,24 @@ function seedCareerRecord(p,force){
  if(!p.leagueWins)p.leagueWins=Math.round(yrs*(p.ovr>=88?0.28:p.ovr>=82?0.14:0.05));
  if(!p.contWins)p.contWins=Math.round(yrs*(p.ovr>=90?0.12:p.ovr>=84?0.05:0));
  if(!p.ac)p.ac=Math.round(yrs*SEASON_LEN*0.62);
+ // Those seeded appearances are backstory: they happened before you took the job, at
+ // clubs that do not exist in this world. The current career spell has to start its
+ // counter from them, not from zero, or a thirty-four-year-old signed on day one is
+ // already credited with 178 appearances "for you" and lands One-Club Man in season 1.
+ if(p.history&&p.history.length){
+   const h=p.history[p.history.length-1];
+   if(!h.out){h.acAt=Math.max(h.acAt||0,p.ac||0);h.gcAt=Math.max(h.gcAt||0,p.gc||0);}
+ }
  p.careerSeeded=1;
+}
+/* Appearances a player has actually made for this club since the career began. The
+   badge and anything else measuring loyalty must use this, never the raw lifetime
+   total, which includes a pre-history that was invented at world generation. */
+function appsForCurrentClub(p){
+ if(!p||!p.history||!p.history.length)return 0;
+ const h=p.history[p.history.length-1];
+ if(h.out)return 0;
+ return Math.max(0,(p.ac||0)-(h.acAt||0));
 }
 function fameSeed(p){
  if(!p||p.team==null)return 0;
@@ -2324,6 +2343,14 @@ const BADGES=[
  {id:"double_jump",name:"Double Jump",desc:"Earn promotion in consecutive seasons"},
  {id:"top_flight",name:"Top Flight",desc:"Reach the top division in your region",f:(t)=>t.tier===0},
  {id:"invincibles",name:"Invincibles",desc:"Go a full league season unbeaten"},
+ /* ---- form: consecutive league results within a season ---- */
+ {id:"run_w5",name:"On a Roll",desc:"Win 5 league games in a row"},
+ {id:"run_w10",name:"Unstoppable",desc:"Win 10 league games in a row"},
+ {id:"run_w15",name:"Juggernaut",desc:"Win 15 league games in a row"},
+ {id:"run_l5",name:"Rough Patch",desc:"Lose 5 league games in a row"},
+ {id:"run_l10",name:"Freefall",desc:"Lose 10 league games in a row"},
+ {id:"run_l15",name:"Rock Bottom",desc:"Lose 15 league games in a row"},
+ {id:"run_d3",name:"Stalemate",desc:"Draw 3 league games in a row"},
  {id:"three_peat",name:"Three-Peat",desc:"Win your division three seasons in a row",f:(t,x)=>x.leagueRun>=3},
  {id:"dynasty",name:"Dynasty",desc:"Win 5 league titles",f:(t)=>(t.leagueTitles||0)>=5},
  {id:"streak_15",name:"Fifteen in a Row",desc:"Win 15 consecutive league titles",f:(t,x)=>x.leagueRun>=15},
@@ -2422,6 +2449,9 @@ const BADGES=[
  {id:"first_moonshot",name:"Skunkworks",desc:"Commission your first research project"},
  {id:"moonshot_landed",name:"It Worked",desc:"Land a research project"},
  {id:"moonshot_failed",name:"Written Off",desc:"Watch a research project come to nothing"},
+ {id:"moonshot_landed_2",name:"Twice Lucky",desc:"Land 2 research projects"},
+ {id:"moonshot_failed_2",name:"Twice Burned",desc:"Watch 2 research projects come to nothing"},
+ {id:"moonshot_failed_3",name:"Money Pit",desc:"Watch 3 research projects come to nothing"},
  {id:"research_house",name:"Research House",desc:"Land 3 research projects"},
  {id:"the_future",name:"The Future",desc:"Land 6 research projects"},
  {id:"academy_gem",name:"Diamond in the Rough",desc:"Have an academy prospect with 90+ potential on your books"},
@@ -2475,7 +2505,8 @@ function checkBadges(){
  if(grads.some(p=>p.ovr>=85))awardBadge("academy_star");
  if((G.xi||[]).map(P).filter(p=>p&&p.academyGraduate&&p.academyClubId===t.id).length>=5)
    awardBadge("homegrown_xi");
- if(squadOf(t).some(p=>p&&(p.ac||0)>=200&&(p.history||[]).length===1&&p.history[0].club===t.name))
+ if(squadOf(t).some(p=>p&&(p.history||[]).length===1&&p.history[0].club===t.name
+   &&appsForCurrentClub(p)>=200))
    awardBadge("loyal_one_club");
  // a player you sold who went on to become an Icon
  G.players.forEach(gp=>{
@@ -3502,6 +3533,55 @@ function cupUserRecord(md,gf,ga,pens){
      logAdd(`${CUP} home gate: ${att.toLocaleString()} attended.`,gate);
    }
  }
+}
+/* The league result deserves the same immediate feedback the cup already gives. A run
+   of form is the thing a president actually feels, so a streak of three or more is
+   reported instead of the table position; below that the table is more informative. */
+function leagueStreak(){
+ const r=G.results||[];
+ if(!r.length)return{kind:null,n:0};
+ const sign=m=>m.gf>m.ga?"W":m.gf<m.ga?"L":"D";
+ const kind=sign(r[r.length-1]);
+ let n=0;
+ for(let i=r.length-1;i>=0;i--){if(sign(r[i])!==kind)break;n++;}
+ return{kind,n};
+}
+/* Runs on its own rather than inside the toast, so form badges are earned whether or
+   not the notification was displayed. A run is measured within a season: G.results is
+   cleared at the turnover, so form cannot bleed from one campaign into the next. */
+function checkFormBadges(){
+ const st=leagueStreak();
+ if(!st.kind)return;
+ if(st.kind==="W"){
+   if(st.n>=5)awardBadge("run_w5");
+   if(st.n>=10)awardBadge("run_w10");
+   if(st.n>=15)awardBadge("run_w15");
+ }else if(st.kind==="L"){
+   if(st.n>=5)awardBadge("run_l5");
+   if(st.n>=10)awardBadge("run_l10");
+   if(st.n>=15)awardBadge("run_l15");
+ }else if(st.n>=3)awardBadge("run_d3");
+}
+function leagueResultToast(){
+ if(QUIET)return;
+ const t=userTeamObj();if(!t)return;
+ const r=G.results||[];
+ const m=r[r.length-1];
+ if(!m||m.md!==G.matchday-1)return;      // no user fixture this round
+ const verb=m.gf>m.ga?"win":m.gf<m.ga?"lose":"draw";
+ const head=`${t.name} ${verb} league game ${m.gf}\u2013${m.ga}.`;
+ const st=leagueStreak();
+ let tail;
+ if(st.n>=3&&st.kind!=="D"){
+   tail=`${st.kind==="W"?"Winning":"Losing"} streak at ${st.n}`;
+ }else if(st.n>=3){
+   tail=`${st.n} draws in a row`;
+ }else{
+   const table=standingsOf(t.region,t.tier);
+   const pos=table.findIndex(x=>x.id===t.id)+1;
+   tail=pos>0?`Now ${ordinal(pos)} on the table`:"";
+ }
+ try{toast(tail?`${head} ${tail}.`:head);}catch(e){}
 }
 function playCupRound(){
  const c=G.cup;if(!c||c.winner!==null)return;
@@ -4568,13 +4648,18 @@ function rndTick(){
      G.news&&G.news.unshift({season:G.season,text:`${userTeamObj().name} unveil ${p.name}, the first of its kind in the game.`});
      const won=Object.keys(r.done).length;
      awardBadge("moonshot_landed");
+     if(won>=2)awardBadge("moonshot_landed_2");
      if(won>=3)awardBadge("research_house");
      if(won>=6)awardBadge("the_future");
    }else{
      r.failed[a.key]=(r.failed[a.key]||0)+1;
      logAdd(`${p.name} came to nothing. ${money(a.cost)} written off.`,-0);
      G.news&&G.news.unshift({season:G.season,text:`${userTeamObj().name} quietly wind up the ${p.name} project after ${money(a.cost)} and nothing to show for it.`});
+     // counted from the ledger, so three failures of the SAME project still count three
+     const lost=r.history.filter(e=>!e.ok).length;
      awardBadge("moonshot_failed");
+     if(lost>=2)awardBadge("moonshot_failed_2");
+     if(lost>=3)awardBadge("moonshot_failed_3");
    }
  });
  r.active=still;
@@ -4672,6 +4757,8 @@ function coachSeasonTick(){
        t.budget+=fee;s.budget-=fee;
        logAdd(`${s.name} lured ${c.name} away. ${money(fee)} compensation received.`,fee);
        G.news.unshift({season:G.season,text:`${s.name} poach head coach ${c.name} from ${t.name}.`});
+       // the poaching club's incumbent, if any, is out of a job the moment he arrives
+       G.coachPool.forEach(x=>{if(x.club===s.id)x.club=null});
        releaseCoachToPool({...c,wage:Math.round(c.wage*1.2/500)*500},s.id);
        G.coach=null;delete G.coachRenewal;
      }
@@ -4686,16 +4773,27 @@ function coachSeasonTick(){
  G.coachPool.forEach(c=>c.age++);
  G.coachPool=G.coachPool.filter(c=>c.age<65);
  // AI clubs hire from the same pool. Hesitate on a candidate and he is gone.
- G.coachPool.filter(c=>c.club==null).forEach(c=>{
-   if(Math.random()<0.22){
-     const clubs=G.teams.filter(x=>x.id!==G.userTeam&&(x.prestige||0)>=c.prestigeReq);
-     if(clubs.length){
-       const ranked=clubs.sort((a,b)=>(b.prestige||0)-(a.prestige||0));
-       const cl=ranked[Math.min(ranked.length-1,ri(0,2))];
-       c.club=cl.id;
-       G.news.unshift({season:G.season,text:`${cl.name} appoint ${c.name} as head coach.`});
-     }
-   }
+ //
+ // A club has ONE head coach. Two things used to break that. First, nothing checked
+ // whether the club already employed somebody, so a free coach could be appointed to a
+ // club that already had one. Second, every free coach was offered the same tiny
+ // shortlist: the whole league sorted by prestige, then a pick from the top three, so
+ // in a single off-season the same two or three big clubs were handed coach after
+ // coach. That is why one club could appear three times in one season's news and end
+ // up holding three head coaches at once.
+ const takenClubs=new Set();
+ G.coachPool.forEach(c=>{if(c.club!=null)takenClubs.add(c.club)});
+ shuffle(G.coachPool.filter(c=>c.club==null)).forEach(c=>{
+   if(Math.random()>=0.22)return;
+   const clubs=G.teams.filter(x=>x.id!==G.userTeam
+     &&!takenClubs.has(x.id)                       // already has a man in the dugout
+     &&(x.prestige||0)>=c.prestigeReq);
+   if(!clubs.length)return;
+   const ranked=clubs.sort((a,b)=>(b.prestige||0)-(a.prestige||0));
+   const cl=ranked[Math.min(ranked.length-1,ri(0,2))];
+   c.club=cl.id;
+   takenClubs.add(cl.id);
+   G.news.unshift({season:G.season,text:`${cl.name} appoint ${c.name} as head coach.`});
  });
  // some employed coaches shake free at season's end
  G.coachPool.forEach(c=>{
