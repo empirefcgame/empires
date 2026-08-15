@@ -195,7 +195,8 @@ function inflPct(){return Math.round(((typeof G!=="undefined"&&G&&G.inflRate)||I
 const REGIONS=[
  {key:"deseret",name:"Deseret",tiers:["Salt Lake","Nauvoo","Kirtland"]},
  {key:"kauai",name:"Kauai",tiers:["Poipu","Napali","Princeville"]},
- {key:"founders",name:"Brainrot",tiers:["Sigma","Rizzler","Chud"]}];
+ {key:"founders",name:"Brainrot",tiers:["Sigma","Rizzler","Chud"]},
+ {key:"guarani",name:"Guaran\u00ed",tiers:["Por\u00e3","Mbyte","Yvy"]}];
 const PER_TIER=10;                       // 10 clubs per tier, 30 per region
 const TIER_GLYPH=["\u2600","\u263D","\u2726"];
 const TIER_CLS=["tier0","tier1","tier2"];
@@ -220,11 +221,23 @@ const REGION_CLUBS={
   "Crocodilo FC","Sahur Rovers","Bananini City","Assassino United","Frigo Camelo FC",
   "Bombombini Town","Papas Gatatas United","Bri Bri FC","Glorbo Fruttodrillo City","Tigrullini Rovers",
   "Orcalero FC","Trulimero United","Bobrito Bandito Town","Matteo City","Cocofanto FC",
-  "Ambalabu United","Pipi Kiwi Rovers","Tracotocutulo FC","Bikini Camanini","Zibra Zubra United"]};
+  "Ambalabu United","Pipi Kiwi Rovers","Tracotocutulo FC","Bikini Camanini","Zibra Zubra United"],
+ /* Guaran\u00ed: Paraguayan towns up top, the wars in the middle, and the food and the
+    folk monsters down in Yvy, the earth tier. Six clubs are named for things in and
+    around Ayolas - the Yacyret\u00e1 dam, the do\u00e1rado run, the A\u00f1a Cu\u00e1 spillway, the
+    Atinguy refuge, the workers' town and the river beach - so one corner of the map
+    reads like a real place instead of a list. */
+ guarani:["Asunci\u00f3n Athletic","Encarnaci\u00f3n United","Ciudad del Este FC","Yacyret\u00e1 FC","Villarrica Wanderers",
+  "Concepci\u00f3n City","Lomito Arabe FC","\u00d1emby Town","Ytororo United","Juan de Ayolas",
+  "Humait\u00e1 Rovers","Curupayty Athletic","Boquer\u00f3n United","Nanawa Town","Cerro Cor\u00e1 FC",
+  "Piribebuy Wanderers","Yaguar\u00f3n Rovers","Paraguar\u00ed Athletic","Rio Paran\u00e1 City","Dorado Town",
+  "Chipa Guasu FC","Mbej\u00fa Town","Vori Vori Rovers","Mandi'o Athletic","Terer\u00e9 City",
+  "Kurup\u00ed Wanderers","Pombero Town","A\u00f1a Cu\u00e1 Rovers","Atinguy Athletic","Villa Permanente United"]};
 const REGION_EXPANSION={
  deseret:["FC Red Rocks","Handcart Athletic","Grid City","Teancum City","Real Brigham","Desolation United","Jacob City","Railroad Racing","St. George United","SLCFC"],
  kauai:["Hanapepe FC","Eleele United","Kaumakani Town","Puhi FC","Omao Athletic","Kilohana United","Wailua Bay FC"],
- founders:["Rhino Toasterino FC","Cacto Hipopotamo United","Ballerino Lololo Town","Tric Trac Baraboom FC","Pomni Ananas United","Svinino Bombondino Town","Ecco Cavallo FC"]};
+ founders:["Rhino Toasterino FC","Cacto Hipopotamo United","Ballerino Lololo Town","Tric Trac Baraboom FC","Pomni Ananas United","Svinino Bombondino Town","Ecco Cavallo FC"],
+ guarani:["Corate\u00ed City","Filadelfia Town","Trinidad Rovers","Salto del Guair\u00e1 FC","Jasy Jater\u00e9 Athletic"]};
 const NAMES={
  /* Deseret's PLAYERS are named out of the Mighty Ducks: character names, the actors who
     played them, and the language of the rink itself. Firsts and lasts are drawn
@@ -266,7 +279,17 @@ const NAMES={
    "Cocofanto","Frigo","Girafa","Espresso","Zibra","Pipi","Matteo","Tracotocutulo","Brr","Rhino"],
   last:["Tralala","Crocodilo","Sahur","Assassino","Cappuccina","Larila","Bananini","Patapim","Ambalabu","Troppi",
    "Gusini","Fruttodrillo","Celeste","Bandito","Camelo","Signora","Bicus","Frulli","Toasterino","Zubra",
-   "Bombardino","Lololo","Baraboom","Ananas","Cavallo","Kiwi","Milo","Frutti","Sahurini","Tralalelo"]}};
+   "Bombardino","Lololo","Baraboom","Ananas","Cavallo","Kiwi","Milo","Frutti","Sahurini","Tralalelo"]},
+ /* Guaran\u00ed players carry Paraguayan given names against surnames drawn from the
+    Guaran\u00ed language and from the country's own place names, which is roughly how the
+    real thing works: a Spanish first name and a surname that means something in the
+    older language. Thirty by thirty is nine hundred combinations. */
+ guarani:{first:["Derlis","Roque","Justo","Celso","Gustavo","Cristian","Oscar","Nelson","Julio","Rodrigo",
+   "Blas","Diego","Enrique","Fabi\u00e1n","Hern\u00e1n","Ignacio","Jorge","Lorenzo","Marcelo","Mat\u00edas",
+   "Pedro","Ram\u00f3n","Santiago","Teodoro","Vicente","Anibal","Bernardo","Casimiro","Efra\u00edn","Gilberto"],
+  last:["Kuarahy","Panamb\u00ed","Mainumby","Jaguarete","Yvoty","Ysyry","Arai","Pyhare","Ko\u1ebd","Guyra",
+   "Mbarete","Tape","Karumbe","Aguara","Mbop\u00ed","Tatu","Kavaju","Piray","Tupa\u00f1","Yryv\u00fa",
+   "Ayolas","Itapu\u00e1","Aman","Cordillera","Guair\u00e1","Misiones","Caaguaz\u00fa","\u00d1eembuc\u00fa","Canindey\u00fa","Amambay"]}};
 /* The names Deseret's players used to carry now belong to the people who run the club
    rather than the ones who play for it: scouts, physios, coaches of every stripe and the
    man who prices your tickets. Front office is a different world from a dressing room,
@@ -772,6 +795,77 @@ function newStaff(id,role){
  const stars=ri(1,5);
  return{id,role,stars,name:staffName()};}
 
+/* A career begun before a region existed is missing thirty clubs and their players.
+   Rather than refuse the save or wipe it, the missing region is built into the running
+   world at the strength it would have had all along, and the president carries on. The
+   new clubs start with no honours, because they were not there to win any. */
+function buildRegionInto(regKey){
+ const reg=regionOf(regKey);if(!reg)return 0;
+ if(G.teams.some(t=>t.region===regKey))return 0;
+ const names=REGION_CLUBS[regKey];if(!names||!names.length)return 0;
+ let tid=G.nextTid!=null?G.nextTid:(Math.max(0,...G.teams.map(t=>t.id))+1);
+ const REG_POOL=720;
+ const ages=[];while(ages.length<REG_POOL)for(let a=16;a<=40&&ages.length<REG_POOL;a++)ages.push(a);
+ shuffle(ages);
+ const posPool=[];const counts={GK:78,DEF:252,MID:252,FWD:138};
+ for(const pos in counts)for(let k=0;k<counts[pos];k++)posPool.push(pos);
+ shuffle(posPool);
+ const regPlayers=[];
+ for(let i=0;i<REG_POOL;i++){
+   const p=newPlayer(G.nextPid++,posPool[i],ages[i],regKey);
+   seedCareerRecord(p,true);p.fame=fameSeed(p);
+   regPlayers.push(p);G.players.push(p);
+ }
+ const clubTeams=names.map((name,i)=>{
+   const tier=i<10?0:i<20?1:2;
+   const t={id:tid++,region:regKey,name,tier,squad:[],academy:[],unhappy:[],
+     budget:Math.round((tier===0?rnd(4e6,8e6):tier===1?rnd(1.5e6,3e6):rnd(.6e6,1.2e6))*inflIndex()),
+     capacity:Math.round(tier===0?rnd(15000,22000):tier===1?rnd(7000,11000):rnd(3000,5500)),
+     stadiumLevel:0,building:0,leagueTitles:0,cupTitles:0,contTitles:0,superTitles:0,leagueTitleSeasons:[],
+     supporters:false,jet:false,jetMaint:"none",facility:0,facilityMaint:"none",facilityBoughtSeason:0,sponsor:null,
+     prestige:Math.round(tier===0?rnd(38,52):tier===1?rnd(20,30):rnd(8,16)),
+     trait:assignTrait(tier),st:blankStd()};
+   G.teams.push(t);return t;});
+ G.nextTid=tid;
+ const tmpl={GK:2,DEF:7,MID:7,FWD:4};
+ for(const pos in tmpl){
+   const cnt=tmpl[pos];
+   const list=regPlayers.filter(p=>p.pos===pos).sort((a,b)=>marketRating(b)-marketRating(a));
+   const per=PER_TIER*cnt;
+   for(let tier=0;tier<3;tier++){
+     const block=list.slice(tier*per,tier*per+per);
+     block.forEach((p,i)=>{const t=clubTeams[tier*PER_TIER+(i%PER_TIER)];
+       p.team=t.id;t.squad.push(p.id);
+       (p.history=p.history||[]).push({club:t.name,in:G.season,gcAt:p.gc||0,acAt:p.ac||0});});
+   }
+   list.slice(3*per).forEach(p=>{p.team=null;if(!G.freeAgents.includes(p.id))G.freeAgents.push(p.id)});
+ }
+ clubTeams.forEach(t=>{
+   t.academy=[];
+   const size=ri(8,14);
+   for(let k=0;k<size;k++){
+     const p=newPlayer(G.nextPid++,pick(INTAKE_POS),ri(16,21),regKey);
+     p.team=t.id;t.academy.push(p.id);G.players.push(p);
+     p.history=[{club:t.name,in:G.season,gcAt:0,acAt:0}];
+     p.academyClubId=t.id;p.academyGraduate=false;
+   }
+ });
+ (G.expansion=G.expansion||[]).push(...(REGION_EXPANSION[regKey]||[]).map(name=>({
+   id:tid++,region:regKey,name,inPool:true,leagueTitles:0,cupTitles:0,contTitles:0,
+   leagueTitleSeasons:[],prestige:8,trait:assignTrait(2)})));
+ G.nextTid=tid;
+ return clubTeams.length;
+}
+function migrateMissingRegions(){
+ let added=0;
+ REGIONS.forEach(r=>{added+=buildRegionInto(r.key)});
+ if(added){
+   rebuildIndex();rebuildTierTeams();
+   (G.news=G.news||[]).unshift({season:G.season,
+     text:`The pyramid expands: ${added} clubs from a new region join the world game.`});
+ }
+ return added;
+}
 function genWorld(ownerName){
  let pid=0,tid=0;const clubIdx={};
  const players=[],teams=[],freeAgents=[];
@@ -841,7 +935,7 @@ function genWorld(ownerName){
     tierTeams:null,fixtures:makeFixtures(PER_TIER),lastResults:null,
     formation:"4-4-2",xi:null,tactics:{mentality:50,pressing:50,tempo:50,width:50,line:50},
     ticketPrice:20,finance:null,log:[],history:[],cup:null,results:[],
-    cups:{regional:[],continental:[],world:[],tippy:[]},wcYearsLeft:4,tippyYearsLeft:2,
+    cups:{regional:[],continental:[],world:[],tippy:[],super:[]},wcYearsLeft:4,tippyYearsLeft:2,
     liaison:false,liaisonCycle:null,gbLog:[],badges:{},badgeStats:{},
     infl:1,inflRate:INFL_BASE,inflHist:[1],rnd:{done:{},failed:{},active:[],offers:[]},
     matchBet:null,futuresBets:[],lastBootRace:{},betLog:[],saga:null,_clubIdx:clubIdx};
@@ -1138,6 +1232,11 @@ function hydrateLoadedG(){
  if(!G.window)G.window={day:4,offersMade:0};
  if(!G.offers)G.offers=[];
  if(G.saga===undefined)G.saga=null;
+ // Super Cup arrived with the fourth region; older careers have no slot for it.
+ if(G.cups&&!Array.isArray(G.cups.super))G.cups.super=[];
+ if(G.superLive===undefined)G.superLive=null;
+ G.teams.forEach(t=>{if(t.superTitles==null)t.superTitles=0;});
+ migrateMissingRegions();
  delete G._topWage;                    // pure cache, rebuilt on demand
  if(G.userTeam!==null&&!G.teams.find(t=>t.id===G.userTeam)){
    const reg=userRegionKeySafe();
@@ -1505,12 +1604,18 @@ function traitOf(t){return t&&t.trait?CLUB_TRAITS[t.trait]:null;}
 const SCORE_W={GK:.01,DEF:.25,MID:1,FWD:2.2};
 function attributeGoals(xi,n){
  const scorers=[];
+ // A side can now legitimately take the field short, so this can be handed an XI with
+ // fewer than eleven names and, in the worst case, none at all. Indexing blindly threw
+ // on the first goal. No players, no scorers: the goals still stand on the scoreboard.
+ if(!xi||!xi.length)return scorers;
  const w=xi.map(p=>p.pos==="GK"?SCORE_W.GK*4:SCORE_W[p.pos]*(p.shooting+p.technique*.4));
  const tot=w.reduce((a,b)=>a+b,0);
  for(let g=0;g<n;g++){
    let r=Math.random()*tot;let k=0;
    while(r>w[k]&&k<w.length-1){r-=w[k];k++}
-   const p=xi[k];p.gs=(p.gs||0)+1;p.gc=(p.gc||0)+1;scorers.push(p.name);
+   const p=xi[Math.min(k,xi.length-1)];
+   if(!p)continue;
+   p.gs=(p.gs||0)+1;p.gc=(p.gc||0)+1;scorers.push(p.name);
    // credit the club he plays for now; the tally stays frozen once he leaves,
    // so a rising youngster can one day overtake a departed legend
    if(p.team!=null){const cl=T(p.team);if(cl){if(!cl.scorers)cl.scorers={};
@@ -2198,12 +2303,19 @@ function shoeMark(t){return t&&t.sponsor?` <span class="shoe" title="${brandInfo
 function openBrandInTier(tier){return SHOE_TIERS[tier].brands.find(b=>brandHolders(b.key).length<SHOE_SLOTS)||null;}
 function shoeRecent(t,win){const s=G.season-(win||6);return{
  conrad:(G.cups.continental||[]).filter(e=>e.winner===t.name&&e.region===t.region&&e.season>=s).length,
+ spr:(G.cups.super||[]).filter(e=>e.winner===t.name&&e.region===t.region&&e.season>=s).length,
  regional:(G.cups.regional||[]).filter(e=>e.winner===t.name&&e.region===t.region&&e.season>=s).length,
  league:(t.leagueTitleSeasons||[]).filter(x=>x>=s).length,
  gb:(G.gbLog||[]).filter(e=>e.team===t.id&&e.season>=s).length};}
-function shoeResume(t){const r=shoeRecent(t,6);return(t.prestige||0)+r.conrad*15+r.regional*6+r.league*8+r.gb*5;}
+function shoeResume(t){const r=shoeRecent(t,6);return(t.prestige||0)+r.conrad*15+r.spr*10+r.regional*6+r.league*8+r.gb*5;}
+/* Super Cups are now a hard gate rather than one signal among several: a top-tier brand
+   wants three of them, a mid-tier brand wants one. They are counted over a club's whole
+   history, not the recent window, because a shoe company is buying the name on the
+   trophy and that does not expire the way recent form does. */
+const SHOE_SUPER_REQ={gold:3,silver:1,bronze:0};
 function shoeQualifies(t,tier){
  const pres=t.prestige||0,r=shoeRecent(t,6);
+ if((t.superTitles||0)<(SHOE_SUPER_REQ[tier]||0))return false;
  if(tier==="gold")  return pres>=SHOE_TIERS.gold.prestige   &&(r.conrad>=1||r.league>=2);
  if(tier==="silver")return pres>=SHOE_TIERS.silver.prestige &&(pres>=55||(r.conrad+r.regional+r.league+r.gb)>=1);
  if(tier==="bronze")return pres>=SHOE_TIERS.bronze.prestige;
@@ -2381,6 +2493,8 @@ const BADGES=[
  {id:"clean_sweep",name:"Clean Sweep",desc:"Win league + regional cup in the same season"},
  {id:"group_heroes",name:"Group Stage Heroes",desc:"Qualify from a cup group as a best third-place team"},
  // conrad
+ {id:"super_qual",name:"Champion of Champions",desc:"Qualify for the Super Cup by winning your regional cup"},
+ {id:"super_win",name:"Best of the Best",desc:"Win the Super Cup"},
  {id:"cont_qual",name:"Continental Qualification",desc:"Qualify for the Conrad Cup"},
  {id:"conrad_contender",name:"Conrad Contender",desc:"Reach the Conrad Cup semi-finals"},
  {id:"conrad_champions",name:"Conrad Champions",desc:"Win the Conrad Cup",f:(t)=>(t.contTitles||0)>=1},
@@ -3702,13 +3816,11 @@ function endSeason(){
  // record league + cup titles
  REGIONS.forEach(r=>{const ch=RT[r.key][0][0];ch.leagueTitles++;
    (ch.leagueTitleSeasons=ch.leagueTitleSeasons||[]).push(G.season);});
- if(G.cup&&G.cup.winner!==null)T(G.cup.winner).cupTitles++;
- // Other regions' cups are decided HERE, before promotion, relegation and expulsion.
- // RT is a snapshot of team objects taken at the final whistle. Simulating afterwards
- // meant a club that had just been thrown out of the pyramid could still lift its
- // regional cup, because the bracket never checked that the club still existed.
- {const ureg2=userRegionKey();
-  REGIONS.forEach(r=>{if(r.key!==ureg2)simulateRegionalCup(r.key,RT);});}
+ // Every regional cup, the user's included, is decided here at the latest: before
+ // promotion, relegation and expulsion, so a club thrown out of the pyramid can never
+ // be credited with the trophy. If the Super Cup already forced the resolution earlier
+ // in the season-over flow, this is a no-op that reuses the cached result.
+ ensureRegionalWinners();
  updatePrestige(RT);
  // promotion / relegation within each region (2 up / 2 down; bottom 2 of tier2 -> expansion)
  REGIONS.forEach(r=>{
@@ -3782,9 +3894,8 @@ function endSeason(){
    champ:RT[ureg][0][0].name,region:ureg,
    cup:G.cup&&G.cup.winner!==null?T(G.cup.winner).name:"—",
    promo:promoted.has(G.userTeam),releg:relegated.has(G.userTeam)});
- // record regional cup winner into cups history
- if(G.cup&&G.cup.winner!==null)
-   G.cups.regional.push({season:G.season,region:ureg,winner:T(G.cup.winner).name});
+ // (the regional cup log is written once, by ensureRegionalWinners, for all four
+ //  regions at the same moment; writing the user's again here double-counted it)
  // ---- season-triggered badges (gs/xi still intact, promotion/relegation resolved) ----
  {const _ut=userTeamObj();if(_ut){
    const bs=G.badgeStats||(G.badgeStats={});
@@ -3865,6 +3976,11 @@ function endSeason(){
  if(G.contLive&&G.contLive.finished){/* played round by round already */}
  else runContinentalCup(RT);
  delete G.contLive;
+ // The Super Cup follows the Conrad Cup. If the president played it round by round it
+ // is already settled; otherwise it is simulated here so the trophy is always awarded.
+ if(G.superLive&&G.superLive.finished){/* played round by round already */}
+ else runSuperCup();
+ G.superLive=null;
  if(G.lastCont&&G.lastCont.season===G.season&&G.lastCont.winnerId!=null&&T(G.lastCont.winnerId)){
    const w=T(G.lastCont.winnerId);
    w.prestige=clamp((w.prestige||0)+22,0,PRESTIGE_MAX);   // the continental crown is the biggest prize
@@ -3902,6 +4018,7 @@ function endSeason(){
  checkBadges();
  G.bombDone=null;
  G.matchday=0;G.season++;G.lastResults=null;G.xi=null;G.results=[];
+ G.regionalWinners=null;   // per-season cache, must not carry into the new campaign
  G.scouted={};G.refused={};G.window={day:1,offersMade:0};G.offers=[];genOffers();
  G.superShort=null;if(G.superScout)buildSuperShortlist();
  for(const role in STAFF_ROLES){
@@ -4086,16 +4203,107 @@ function simulateRegionalCup(regionKey,RT){
  G.cups.regional.push({season:G.season,region:regionKey,winner:winner.name});
  return winner;
 }
+const CONT_PER_REGION=4;                           // top 4 of each region -> 16 clubs
 const CONT_PRIZE=[200000,400000,800000,1500000];   // R16/QF/SF/Final
 const CONT_ROUNDS=["Round of 16","Quarterfinal","Semifinal","Final"];
 function contQualifiers(RT){
- // 5 from each region (15) + best 6th-place club as wildcard = 16, clean bracket
+ // Top 4 of each region's first tier. With four regions that is a clean 16 and no
+ // wildcard is needed; the old 5-per-region-plus-wildcard maths was tuned to three
+ // regions and produced 21 once Guaran\u00ed joined, which no bracket can seed.
  const qualifiers=[];
- REGIONS.forEach(r=>RT[r.key][0].slice(0,5).forEach(t=>qualifiers.push(t.id)));
- const sixths=REGIONS.map(r=>RT[r.key][0][5]).filter(Boolean)
-   .sort((a,b)=>b.st.Pts-a.st.Pts||(b.st.GF-b.st.GA)-(a.st.GF-a.st.GA));
- if(sixths[0])qualifiers.push(sixths[0].id);        // wildcard
+ REGIONS.forEach(r=>RT[r.key][0].slice(0,CONT_PER_REGION).forEach(t=>{if(t&&T(t.id))qualifiers.push(t.id)}));
  return qualifiers;
+}
+/* ---- The Super Cup: the four regional cup winners, played after the Conrad Cup ----
+   Two rounds, four clubs, and the same round-by-round experience a president gets in
+   the Conrad Cup when he qualifies for it. */
+const SUPER_CUP="The Super Cup";
+const SUPER_ROUNDS=["Semifinal","Final"];
+const SUPER_PRIZE=[700000,1400000];
+const SUPER_TITLE_BONUS=2000000;
+/* The regional cup winners have to exist BEFORE endSeason, because the Super Cup is
+   played while the season's clubs are still in their season's places. Resolved once,
+   cached against the season, and reused by endSeason so no cup is ever run twice. */
+function ensureRegionalWinners(){
+ if(G.regionalWinners&&G.regionalWinners.season===G.season)return G.regionalWinners;
+ const RT={};REGIONS.forEach(r=>RT[r.key]=[0,1,2].map(tier=>standingsOf(r.key,tier)));
+ const ureg=userRegionKey();
+ const byRegion={};
+ REGIONS.forEach(r=>{
+   if(r.key===ureg){
+     const w=G.cup&&G.cup.winner!=null?G.cup.winner:null;
+     if(w!=null&&T(w)){
+       T(w).cupTitles=(T(w).cupTitles||0)+1;
+       G.cups.regional.push({season:G.season,region:r.key,winner:T(w).name});
+     }
+     byRegion[r.key]=w;
+   }else{
+     const win=simulateRegionalCup(r.key,RT);
+     byRegion[r.key]=win?win.id:null;
+   }
+ });
+ G.regionalWinners={season:G.season,byRegion};
+ return G.regionalWinners;
+}
+function superQualifiers(){
+ const w=ensureRegionalWinners();
+ return REGIONS.map(r=>w.byRegion[r.key]).filter(id=>id!=null&&T(id));
+}
+function superPlayRound(st){
+ if(st.finished)return;
+ if(!st.userOut&&G.coachAuto&&coachTier()>0){coachRunSetup();G._coachPlanKey=coachPlanKey();}
+ const rn=SUPER_ROUNDS[Math.min(st.round,SUPER_ROUNDS.length-1)];
+ st.lastRound={name:rn,lines:[]};
+ const next=[];
+ for(let i=0;i<st.alive.length;i+=2){
+   const h=st.alive[i],a=st.alive[i+1];
+   if(a==null){next.push(h);continue;}          // odd field: a bye rather than a crash
+   let[hg,ag]=simMatch(teamXI(h),teamXI(a),teamTac(h),teamTac(a),teamBoost(h),teamBoost(a),0);
+   let pens=false;if(hg===ag){pens=true;if(Math.random()<.5)hg++;else ag++;}
+   const wnr=hg>ag?h:a;next.push(wnr);
+   const line=`${T(h).name} ${hg}\u2013${ag} ${T(a).name}${pens?" (pens)":""}`;
+   st.log.unshift({round:rn,line});
+   st.lastRound.lines.push({line,user:h===G.userTeam||a===G.userTeam,won:wnr===G.userTeam});
+   if(h===G.userTeam||a===G.userTeam){
+     if(wnr===G.userTeam){const pr=IN(SUPER_PRIZE[Math.min(st.round,SUPER_PRIZE.length-1)]);
+       T(G.userTeam).budget+=pr;logAdd(`${SUPER_CUP}: won a ${rn}.`,pr);}
+     else{st.userOut=true;logAdd(`${SUPER_CUP}: knocked out in the ${rn}.`);}
+   }
+ }
+ st.alive=next;st.round++;
+ if(st.alive.length<=1)superFinish(st);
+}
+function superFinish(st){
+ if(st.finished)return;
+ const winner=st.alive[0];
+ if(winner!=null&&T(winner)){
+   T(winner).superTitles=(T(winner).superTitles||0)+1;
+   T(winner).prestige=clamp((T(winner).prestige||0)+4,0,PRESTIGE_MAX);
+   (G.cups.super=G.cups.super||[]).push({season:G.season,winner:T(winner).name,region:T(winner).region});
+   if(winner===G.userTeam){
+     const bonus=IN(SUPER_TITLE_BONUS);
+     T(G.userTeam).budget+=bonus;
+     logAdd(`${SUPER_CUP}: CHAMPIONS of the Super Cup!`,bonus);
+     awardBadge("super_win");
+   }
+ }
+ G.lastSuper={winner:winner!=null&&T(winner)?T(winner).name:"\u2014",winnerId:winner!=null?winner:null,
+   season:G.season,log:st.log.slice(0,6),qualified:st.qualified};
+ st.finished=true;
+}
+function runSuperCup(){
+ const q=superQualifiers();
+ if(q.length<2){G.lastSuper=null;return;}
+ const st={alive:shuffle(q.slice()),round:0,log:[],qualified:q.includes(G.userTeam),
+   userOut:!q.includes(G.userTeam),finished:false};
+ while(!st.finished)superPlayRound(st);
+}
+function startSuperCup(){
+ const q=superQualifiers();
+ G.superLive={alive:shuffle(q.slice()),round:0,log:[],qualified:q.includes(G.userTeam),
+   userOut:!q.includes(G.userTeam),finished:false};
+ if(G.superLive.qualified)awardBadge("super_qual");
+ saveGame(true);
 }
 function contPlayRound(st){
  // one knockout round: every tie in it, the user's included
@@ -5296,7 +5504,7 @@ function renderStart(){
   s.appendChild($(`<div class="divider"></div>`));}
 
  s.appendChild($(`<div class="lbl" style="margin-bottom:6px">Your name, President</div>`));
- const nameIn=$(`<input type="text" maxlength="24" placeholder="e.g. Drew" value="${G&&G.owner!=="President"?G.owner:""}">`);
+ const nameIn=$(`<input type="text" maxlength="24" placeholder="Your name" value="${G&&G.owner!=="President"?G.owner:""}">`);
  s.appendChild(nameIn);
  s.appendChild($(`<div class="small muted" style="margin:10px 0 4px">Pick a region, then the club you will run</div>`));
 
@@ -5472,6 +5680,7 @@ function trophyCard(t){
    :(t.id===G.userTeam?(G.history||[]).filter(h=>h.tier===0&&h.rank===1).map(h=>h.season):[]);
  const cupSeasons=((G.cups&&G.cups.regional)||[]).filter(e=>e.winner===t.name&&e.region===t.region).map(e=>e.season);
  const contSeasons=((G.cups&&G.cups.continental)||[]).filter(e=>e.winner===t.name&&e.region===t.region).map(e=>e.season);
+ const superSeasons=((G.cups&&G.cups.super)||[]).filter(e=>e.winner===t.name&&e.region===t.region).map(e=>e.season);
  const row=$(`<div class="row"></div>`);
  const detail=$(`<div class="small center" style="margin-top:8px;display:none"></div>`);
  function mkStat(lbl,count,seasons){
@@ -5489,8 +5698,9 @@ function trophyCard(t){
  row.appendChild(mkStat("League titles",t.leagueTitles,leagueSeasons));
  row.appendChild(mkStat(cupName,t.cupTitles,cupSeasons));
  row.appendChild(mkStat(contName,t.contTitles,contSeasons));
+ row.appendChild(mkStat(SUPER_CUP.replace("The ",""),t.superTitles,superSeasons));
  c.appendChild(row);c.appendChild(detail);
- if(!(t.leagueTitles||t.cupTitles||t.contTitles))
+ if(!(t.leagueTitles||t.cupTitles||t.contTitles||t.superTitles))
    c.appendChild($(`<div class="small muted center" style="margin-top:6px">No silverware yet. Win a division, the cup, or the ${CONT_CUP} to fill the cabinet.</div>`));
  else
    c.appendChild($(`<div class="small muted center" style="margin-top:6px">Tap a trophy to see the winning seasons.</div>`));
@@ -5614,6 +5824,7 @@ function viewClub(w){
      if(G.userSurvived){m+=" \u2014 you dodged expulsion as a rival folded!";G.userSurvived=false;}
      toast(m);
      if(G.lastCont)setTimeout(()=>toast(`${CONT_CUP}: ${G.lastCont.winner} champions${G.lastCont.qualified?" \u00B7 you qualified":""}.`),600);
+     if(G.lastSuper&&G.lastSuper.season===G.season-1)setTimeout(()=>toast(`\u2606 ${SUPER_CUP.replace("The ","")}: ${G.lastSuper.winner} champions.`),900);
      if(G.lastWC&&G.lastWC.season===G.season-1)setTimeout(()=>toast(`\u2691 World Cup won by ${G.lastWC.champion}!`),1200);
      if(G.lastTippy&&G.lastTippy.season===G.season-1)setTimeout(()=>toast(`\u2728 Tippy Cup won by ${G.lastTippy.champion}!`),1400);
      render();
@@ -5637,8 +5848,10 @@ function viewClub(w){
      }else{
        w.appendChild($(`<div class="card center"><b class="gold">Season complete</b>
          <div class="small muted" style="margin-top:4px">You did not qualify for the ${CONT_CUP.replace("The ","")} this season. It will be simulated, then promotion, relegation, ageing and new youth are processed and a new window opens.</div></div>`));
-       const b=$(`<button class="btn cont">Sim the ${CONT_CUP.replace("The ","")} + advance to Season ${G.season+1}</button>`);
-       b.onclick=advance;
+       const b=$(`<button class="btn cont">Sim the ${CONT_CUP.replace("The ","")}</button>`);
+       b.onclick=()=>{const RT2={};REGIONS.forEach(r=>RT2[r.key]=[0,1,2].map(tier=>standingsOf(r.key,tier)));
+         runContinentalCup(RT2);G.contLive={alive:[G.lastCont&&G.lastCont.winnerId],round:4,log:G.lastCont?G.lastCont.log:[],
+           qualified:false,userOut:true,finished:true};saveGame(true);render()};
        w.appendChild(b);
      }
    }else{
@@ -5664,15 +5877,13 @@ function viewClub(w){
        b.onclick=()=>{contPlayRound(G.contLive);roundFeedback();saveGame(true);render()};
        w.appendChild(b);
      }else if(!live.finished){
-       const b=$(`<button class="btn cont">Sim the rest of the cup + advance to Season ${G.season+1}</button>`);
-       b.onclick=()=>{while(!G.contLive.finished)contPlayRound(G.contLive);advance()};
+       const b=$(`<button class="btn cont">Sim the rest of the cup</button>`);
+       b.onclick=()=>{while(!G.contLive.finished)contPlayRound(G.contLive);saveGame(true);render()};
        w.appendChild(b);
      }else{
        w.appendChild($(`<div class="card center" style="border-color:var(--honey)">
          <b class="gold">${live.alive[0]===G.userTeam?`CHAMPIONS of the ${CONT_CUP.replace("The ","")}!`:`${T(live.alive[0])?T(live.alive[0]).name:"\u2014"} win the ${CONT_CUP.replace("The ","")}.`}</b></div>`));
-       const b=$(`<button class="btn cont">Advance to Season ${G.season+1}</button>`);
-       b.onclick=advance;
-       w.appendChild(b);
+       superPhase(w,advance);
      }
    }
  }
@@ -5716,6 +5927,68 @@ function viewClub(w){
    wireNames(nc);
    w.appendChild(nc);
  }
+}
+
+/* The Super Cup phase of the season-over screen. Drawn after the Conrad Cup has been
+   settled, and deliberately built to feel identical: a draw, a round button, results
+   with your tie highlighted, then the advance button. A president who wins his regional
+   cup gets the same round-by-round tension whether or not he made the Conrad Cup. */
+function superPhase(w,advance){
+ const live=G.superLive;
+ const nextBtn=()=>{const b=$(`<button class="btn cont">Advance to Season ${G.season+1}</button>`);
+   b.onclick=advance;w.appendChild(b);};
+ if(!live){
+   const q=superQualifiers();
+   if(q.length<2){nextBtn();return;}
+   const inCup=q.includes(G.userTeam);
+   if(inCup){
+     w.appendChild($(`<div class="card center" style="border-color:var(--honey)">
+       <b class="gold">You won your regional cup \u2014 you are in the ${SUPER_CUP.replace("The ","")}!</b>
+       <div class="small muted" style="margin-top:4px">The four regional cup winners, two rounds, one tap at a time. The champion takes ${money(IN(SUPER_TITLE_BONUS))}.</div></div>`));
+     const b=$(`<button class="btn cont">Go to the ${SUPER_CUP.replace("The ","")} draw</button>`);
+     b.onclick=()=>{startSuperCup();render()};
+     w.appendChild(b);
+   }else{
+     const names=q.map(id=>T(id)?T(id).name:"\u2014").join(", ");
+     w.appendChild($(`<div class="card"><div class="small"><b class="gold">${SUPER_CUP.replace("The ","")}</b>
+       <div class="small muted" style="margin-top:4px">Contested by the regional cup winners: ${names}. Win your regional cup to take part.</div></div></div>`));
+     const b=$(`<button class="btn cont">Sim the ${SUPER_CUP.replace("The ","")} + advance to Season ${G.season+1}</button>`);
+     b.onclick=advance;
+     w.appendChild(b);
+   }
+   return;
+ }
+ if(live.lastRound){
+   const rc=$(`<div class="card"></div>`);
+   rc.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">${SUPER_CUP.replace("The ","")} ${live.lastRound.name} results</h3>`));
+   live.lastRound.lines.forEach(l=>rc.appendChild($(`<div class="logline" ${l.user?`style="border-left:3px solid ${l.won?'var(--win)':'var(--loss)'};padding-left:7px"`:""}><span class="${l.user?'gold':''}">${l.line}</span></div>`)));
+   w.appendChild(rc);
+ }
+ if(live.finished){
+   w.appendChild($(`<div class="card center" style="border-color:var(--honey)">
+     <b class="gold">${live.alive[0]===G.userTeam?`CHAMPIONS of the ${SUPER_CUP.replace("The ","")}!`:`${T(live.alive[0])?T(live.alive[0]).name:"\u2014"} win the ${SUPER_CUP.replace("The ","")}.`}</b></div>`));
+   nextBtn();return;
+ }
+ if(live.userOut){
+   const b=$(`<button class="btn cont">Sim the rest of the ${SUPER_CUP.replace("The ","")} + advance</button>`);
+   b.onclick=()=>{while(!G.superLive.finished)superPlayRound(G.superLive);advance()};
+   w.appendChild(b);return;
+ }
+ const rn=SUPER_ROUNDS[Math.min(live.round,SUPER_ROUNDS.length-1)];
+ const dc=$(`<div class="card"></div>`);
+ dc.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">${SUPER_CUP.replace("The ","")} ${rn} draw</h3>`));
+ for(let i=0;i<live.alive.length;i+=2){
+   const h=live.alive[i],a=live.alive[i+1];
+   const mine=h===G.userTeam||a===G.userTeam;
+   dc.appendChild($(`<div class="logline" ${mine?'style="border-left:3px solid var(--honey);padding-left:7px"':''}><span class="${mine?'gold':''}">${T(h)?T(h).name:"\u2014"}${a!=null?` vs ${T(a)?T(a).name:"\u2014"}`:" (bye)"}</span></div>`));
+ }
+ w.appendChild(dc);
+ const b=$(`<button class="btn cont">Play the ${rn}</button>`);
+ b.onclick=()=>{superPlayRound(G.superLive);
+   const lr=G.superLive.lastRound,mine=lr&&lr.lines.find(l=>l.user);
+   if(mine)toast(mine.won?(G.superLive.finished?`CHAMPIONS! The ${SUPER_CUP.replace("The ","")} is yours!`:`Through! ${mine.line}`):`Out. ${mine.line}`);
+   saveGame(true);render()};
+ w.appendChild(b);
 }
 
 /* ---------- SQUAD ---------- */
@@ -6512,8 +6785,14 @@ function viewOffice(w){
     sp.appendChild($(`<div class="small" style="margin-bottom:8px">The liaison is being evaluated by the brands. A pitch comes at season\u2019s end. Where you stand right now:</div>`));
     ["gold","silver","bronze"].forEach(tier=>{
       const q=shoeQualifies(t,tier),open=!!openBrandInTier(tier);
-      const status=q?(open?'<span class="gold">Interested \u2014 slot open</span>':'<span style="color:var(--draw)">Interested \u2014 must out-do a current club</span>'):'<span class="muted">Out of reach</span>';
-      sp.appendChild($(`<div class="small" style="margin-bottom:3px">${SHOE_TIERS[tier].name} (${money(shoeValueOf(tier))}/yr): ${status}</div>`));
+      // A club blocked purely on Super Cups is told so. Being "out of reach" with no
+      // reason given is the kind of dead end a president cannot plan around.
+      const need=SHOE_SUPER_REQ[tier]||0,have=t.superTitles||0;
+      const shortBy=Math.max(0,need-have);
+      const status=q?(open?'<span class="gold">Interested \u2014 slot open</span>':'<span style="color:var(--draw)">Interested \u2014 must out-do a current club</span>')
+        :shortBy?`<span class="muted">Needs ${shortBy} more ${SUPER_CUP.replace("The ","")}${shortBy===1?"":"s"}</span>`
+        :'<span class="muted">Out of reach</span>';
+      sp.appendChild($(`<div class="small" style="margin-bottom:3px">${SHOE_TIERS[tier].name} (${money(shoeValueOf(tier))}/yr): ${status}${need?` <span class="muted">\u00B7 ${have}/${need} Super Cups</span>`:""}</div>`));
     });
     const fb=$(`<button class="btn sm sec" style="margin-top:8px">Release liaison</button>`);fb.onclick=fireLiaison;sp.appendChild(fb);
   }
@@ -6828,13 +7107,30 @@ function viewCup(w){
    tc.log.slice(0,6).forEach(e=>tpc.appendChild($(`<div class="logline"><span class="muted">${e.round}</span><span>${e.line}</span></div>`)));
  }else tpc.appendChild($(`<div class="small muted">Not yet contested.</div>`));
  w.appendChild(tpc);
- const anyHist=(G.cups.regional.length||G.cups.continental.length||G.cups.world.length||(G.cups.tippy||[]).length);
+ // ---- Super Cup panel ----
+ {const spc=$(`<div class="card"></div>`);
+  const last=(G.cups.super||[]).slice(-1)[0];
+  spc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\u2606 ${SUPER_CUP.replace("The ","")}</h3>
+    <div class="small muted" style="margin-bottom:6px">The four regional cup winners meet after the ${CONT_CUP.replace("The ","")}: two rounds, one champion. Win your regional cup and you are in it. Champion takes ${money(IN(SUPER_TITLE_BONUS))}.</div>`));
+  const live=G.superLive;
+  if(live&&live.log&&live.log.length){
+    live.log.slice(0,4).forEach(e=>spc.appendChild($(`<div class="logline"><span class="muted">${e.round}</span><span>${e.line}</span></div>`)));
+  }else if(last){
+    spc.appendChild($(`<div class="logline"><span class="muted">Season ${last.season} champions</span><span class="gold">${last.winner}</span></div>`));
+    if(G.lastSuper&&G.lastSuper.log)G.lastSuper.log.slice(0,4).forEach(e=>spc.appendChild($(`<div class="logline"><span class="muted">${e.round}</span><span>${e.line}</span></div>`)));
+  }else spc.appendChild($(`<div class="small muted">Not yet contested. It is decided at the end of the season.</div>`));
+  const ut=userTeamObj();
+  if(ut&&(ut.superTitles||0)>0)
+    spc.appendChild($(`<div class="small gold" style="margin-top:6px">${ut.name} have won it ${ut.superTitles} time${ut.superTitles===1?"":"s"}.</div>`));
+  w.appendChild(spc);}
+ const anyHist=(G.cups.regional.length||G.cups.continental.length||G.cups.world.length||(G.cups.tippy||[]).length||(G.cups.super||[]).length);
  if(anyHist){
    const hc=$(`<div class="card"></div>`);
    hc.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Cup history</h3>`));
    const tabs=[["world","World",G.cups.world.length],
                ["tippy","Tippy",(G.cups.tippy||[]).length],
                ["continental","Conrad",G.cups.continental.length],
+               ["super","Super",(G.cups.super||[]).length],
                ["regional","Regional",G.cups.regional.length]].filter(t=>t[2]>0);
    if(!tabs.find(t=>t[0]===CUPHIST_TAB))CUPHIST_TAB=tabs[0][0];
    const row=$(`<div class="row" style="gap:6px;margin-bottom:8px"></div>`);
@@ -6850,6 +7146,8 @@ function viewCup(w){
      (G.cups.tippy||[]).slice().reverse().forEach(e=>hc.appendChild($(`<div class="logline"><span class="muted">Season ${e.season}</span><span class="gold">${e.champion}</span></div>`)));
    }else if(CUPHIST_TAB==="continental"){
      G.cups.continental.slice().reverse().forEach(e=>hc.appendChild($(`<div class="logline"><span class="muted">Season ${e.season}</span><span class="gold">${e.winner}</span></div>`)));
+   }else if(CUPHIST_TAB==="super"){
+     (G.cups.super||[]).slice().reverse().forEach(e=>hc.appendChild($(`<div class="logline"><span class="muted">S${e.season} \u00B7 ${regionOf(e.region)?regionOf(e.region).name:"\u2014"}</span><span class="gold">${e.winner}</span></div>`)));
    }else{
      G.cups.regional.slice().reverse().slice(0,18).forEach(e=>hc.appendChild($(`<div class="logline"><span class="muted">S${e.season} \u00B7 ${regionOf(e.region).name}</span><span class="gold">${e.winner}</span></div>`)));
    }
