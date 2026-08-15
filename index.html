@@ -2,8 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Empire FC</title>
+<meta name="description" content="Run a football club. Build a dynasty across four regions.">
+<meta name="theme-color" content="#0d1531">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<!-- iOS has no install prompt and ignores the manifest's display mode, so the
+     standalone hint has to be given the old way as well as the standard way. -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Empire FC">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -16,13 +27,17 @@
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;padding:0;background:var(--night);color:var(--parch);
     font-family:"Open Sans",system-ui,sans-serif;font-size:14px;line-height:1.45;overscroll-behavior:none}
-  #app{max-width:520px;margin:0 auto;min-height:100vh;padding-bottom:70px}
+  /* Installed to a home screen the game draws under the status bar and the home
+     indicator, so the fixed nav and the scroll floor both need the device insets.
+     env() resolves to 0 in a normal browser tab, so this is inert until installed. */
+  #app{max-width:520px;margin:0 auto;min-height:100vh;min-height:100dvh;
+    padding-bottom:calc(70px + env(safe-area-inset-bottom))}
   @media(min-width:768px){#app,nav{max-width:740px}}
   h1,h2,h3{font-weight:800;letter-spacing:.01em;margin:0}
   .gold{color:var(--honey)}.muted{color:var(--muted)}.small{font-size:12px}
   .center{text-align:center}
   table,.big,.scoreline{font-variant-numeric:tabular-nums}
-  header{padding:14px 16px 10px;border-bottom:1px solid var(--line);
+  header{padding:calc(14px + env(safe-area-inset-top)) 16px 10px;border-bottom:1px solid var(--line);
     display:flex;align-items:center;gap:12px;position:sticky;top:0;background:var(--night);z-index:5}
   .crest{width:38px;height:38px;flex:none}
   header .t{flex:1}
@@ -69,7 +84,8 @@
   .ageout{color:#ff8fb3;font-weight:800;font-size:10px;margin-left:3px}
   .injtag{color:var(--loss);font-size:10px;font-weight:700}
   nav{position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto;
-    background:var(--night2);border-top:1px solid var(--line);display:flex;height:66px;z-index:6}
+    background:var(--night2);border-top:1px solid var(--line);display:flex;z-index:6;
+    height:calc(66px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom)}
   nav button{flex:1;background:none;color:var(--muted);font-size:9px;font-weight:700;
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
     text-transform:uppercase;letter-spacing:.04em;border-radius:0}
@@ -148,6 +164,33 @@
    ======================================================================== */
 
 const SAVE_KEY="empireFC2_v1";
+
+/* ---------------- telemetry ----------------
+   One funnel question matters right now: do people who are not friends and family
+   start a career, and do they come back and finish seasons. That is a handful of
+   milestone events, NOT one per matchday - an eighteen-round season would burn
+   through any free analytics tier and tell us nothing we cannot infer from the
+   season counter anyway.
+
+   track() is deliberately incapable of breaking the game: no provider, no network,
+   a blocked script or a thrown error all end the same way, silently. */
+function track(name,data){
+ try{
+   if(typeof umami!=="undefined"&&umami&&umami.track)umami.track(name,data||undefined);
+ }catch(e){}
+}
+/* localStorage is script-writable storage, which Safari clears after a period of
+   inactivity and every browser may evict under pressure. A career is hours of work,
+   so ask for the durable bucket. Granted silently on an installed PWA; on the open
+   web it is a request, not a guarantee, which is exactly why Export still exists. */
+function requestDurableStorage(){
+ try{
+   if(navigator.storage&&navigator.storage.persist&&navigator.storage.persisted){
+     navigator.storage.persisted().then(already=>{if(!already)navigator.storage.persist();});
+   }
+ }catch(e){}
+}
+if(typeof navigator!=="undefined")requestDurableStorage();
 /* ---- Empire FC 2: squad structure ----
    Senior squads are capped at 20 and every club runs an academy of up to 20 under-23s.
    Youth develop in the academy and must be promoted into a senior slot or moved on when
@@ -4244,6 +4287,8 @@ function endSeason(){
  }
  initCup();
  clearNatDuty();assignNatDuty();
+ // One event per season, not one per matchday: this is the retention curve.
+ track("season_completed",{season:G.season-1});
  saveGame(true);
 }
 function stockClub(t){
@@ -5653,12 +5698,15 @@ function nameLink(q){return q?`<span class="pname" data-p="${q.id}">${q.name}</s
 function stars(n){return `<span class="stars">${"\u2605".repeat(n)}${"\u2606".repeat(5-n)}</span>`;}
 function ageCell(p){return p.age>=40?`${p.age}<span class="ret">R</span>`:p.age;}
 
-function crestSVG(){return `<svg class="crest" viewBox="0 0 48 48" fill="none">
- <g stroke="#edbb00" stroke-width="2" fill="none">
-   <ellipse cx="24" cy="15" rx="6" ry="3.4"/><ellipse cx="24" cy="21" rx="9" ry="4"/>
-   <ellipse cx="24" cy="28" rx="11" ry="4.4"/><ellipse cx="24" cy="35.5" rx="12.5" ry="4.6"/></g>
- <circle cx="24" cy="9" r="2" fill="#a50044"/>
- <path d="M20 40 q4 3 8 0" stroke="#edbb00" stroke-width="2" fill="none"/></svg>`;}
+function crestSVG(){return `<svg class="crest" viewBox="0 0 48 48" fill="none" role="img" aria-label="Empire FC">
+ <path d="M4.8 3.84 H43.2 V21.12 C43.2 36 32.16 42.24 24 45.6 C15.84 42.24 4.8 36 4.8 21.12 Z"
+   fill="#a50044" stroke="#edbb00" stroke-width="1.73" stroke-linejoin="round"/>
+ <path d="M7.3 6.52 H40.7 V21.56 C40.7 34.5 31.1 39.93 24 42.85 C16.9 39.93 7.3 34.5 7.3 21.56 Z"
+   fill="none" stroke="#edbb00" stroke-width="0.58" stroke-linejoin="round"/>
+ <text x="24" y="21.6" text-anchor="middle" dominant-baseline="central"
+   textLength="25" lengthAdjust="spacingAndGlyphs"
+   font-family="'Open Sans',system-ui,sans-serif" font-weight="800" font-size="14"
+   fill="#ffd94d">EFC</text></svg>`;}
 
 function render(){
  if(!G||G.userTeam===null){renderStart();return;}
@@ -5742,6 +5790,8 @@ function renderStart(){
    G.owner=(nameIn.value.trim().replace(/[<>&"]/g,"")||"President").slice(0,24);
    G.userTeam=id;initCup();cupScheduleUser();
    G.window={day:1,offersMade:0};genOffers();
+   track("career_started",{region:userRegionKey(),tier:T(id)?T(id).tier:null});
+   requestDurableStorage();   // a real career now exists: ask for the durable bucket
    TAB="club";saveGame(true);render();
  };
  [0,1,2].forEach(tier=>{
@@ -6089,7 +6139,10 @@ function viewClub(w){
    const opp=g&&T(g.opp)?T(g.opp).name:"\u2014";
    w.appendChild($(`<div class="card row"><div class="lbl">${cupLabel(t.region)}</div>
      <div>${g?`<b>${g.home?"Home":"Away"}</b> vs ${opp}`:opp}</div></div>`));
-   const b=$(`<button class="btn cup">Play the ${g?g.round:CUP+" round"}</button>`);
+   // "the Round of 16" and "the Quarterfinal" want the article; "the Group Round 1"
+   // does not, so only the knockout names take it.
+   const rn=g?g.round:CUP+" round";
+   const b=$(`<button class="btn cup">Play ${/^Group/.test(rn)?"":"the "}${rn}</button>`);
    b.onclick=()=>{playPendingCupRound();render()};
    w.appendChild(b);
    w.appendChild($(`<div class="small muted center" style="margin-top:6px">Matchday ${G.matchday} is settled. Rotate the side or change your dials before the cup tie if you want to.</div>`));
@@ -7595,6 +7648,15 @@ function viewWorldTeam(w,id){
 /* boot */
 if(loadGame()&&G.userTeam!==null){TAB="club";render()}
 else{G=null;renderStart()}
+
+/* The service worker is registered last and its failure is swallowed. It makes the
+   game installable and playable offline; it is not allowed to be a reason the game
+   does not start. */
+if("serviceWorker" in navigator){
+ addEventListener("load",()=>{
+   navigator.serviceWorker.register("./sw.js").catch(()=>{});
+ });
+}
 </script>
 </body>
 </html>
