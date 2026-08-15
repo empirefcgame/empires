@@ -96,6 +96,16 @@
   .cupmark{font-size:9px;font-weight:800;color:#ff9dc0;letter-spacing:.08em;width:30px}
   .amt-p{color:var(--win)}.amt-n{color:var(--loss)}
   .logline{padding:7px 0;border-bottom:1px solid rgba(56,44,96,.4);font-size:12px;display:flex;gap:8px;justify-content:space-between}
+  /* A long club name used to push the right-hand span past the card edge, because a
+     flex item will not shrink below its content width unless it is told it may. */
+  .logline>span{min-width:0;overflow-wrap:anywhere}
+  .logline>span+span{text-align:right}
+  /* Equal-width tab strip that cannot overflow: every column is minmax(0,1fr), so the
+     buttons shrink with the card instead of running off the side of a phone. */
+  .tabgrid{display:grid;gap:5px;margin-bottom:8px}
+  .tabgrid .btn{width:100%;padding:7px 3px;font-size:11px;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;letter-spacing:0}
+  .histscroll{max-height:300px;overflow-y:auto;-webkit-overflow-scrolling:touch;margin:0 -2px;padding:0 2px}
   .stars{color:var(--honey);letter-spacing:1px;font-size:11px}
   .pname{color:var(--honey2);text-decoration:underline;text-decoration-color:rgba(242,201,76,.35);cursor:pointer}
   .pname.goat{font-weight:800;color:#fff5cf;text-decoration-color:var(--honey)}
@@ -943,7 +953,7 @@ function genWorld(ownerName){
     userTeam:null,userRegion:null,season:1,matchday:0,
     tierTeams:null,fixtures:makeFixtures(PER_TIER),lastResults:null,
     formation:"4-4-2",xi:null,tactics:{mentality:50,pressing:50,tempo:50,width:50,line:50},
-    ticketPrice:20,finance:null,log:[],history:[],cup:null,results:[],
+    ticketPrice:20,finance:null,log:[],history:[],cup:null,results:[],pendingCup:null,
     cups:{regional:[],continental:[],world:[],tippy:[],super:[]},wcYearsLeft:4,tippyYearsLeft:2,
     liaison:false,liaisonCycle:null,gbLog:[],badges:{},badgeStats:{},
     infl:1,inflRate:INFL_BASE,inflHist:[1],rnd:{done:{},failed:{},active:[],offers:[]},
@@ -962,7 +972,10 @@ function rebuildTierTeams(){
  G.tierTeams=REGIONS.map(()=>[[],[],[]]);
  G.teams.forEach(t=>G.tierTeams[regionIdx(t.region)][t.tier].push(t.id));
 }
-function tierClubs(regionKey,tier){return G.tierTeams[regionIdx(regionKey)][tier];}
+function tierClubs(regionKey,tier){
+ const r=G.tierTeams[regionIdx(regionKey)];
+ return r&&r[tier]?r[tier]:[];   // unknown region: an empty tier, not a thrown screen
+}
 function userRegionKey(){const t=T(G.userTeam);return t?t.region:REGIONS[0].key;}
 function userRegionKeySafe(){const t=T(G.userTeam);return t?t.region:REGIONS[0].key;}
 function makeFixtures(n){
@@ -992,15 +1005,31 @@ function makeFixtures(n){
    to the original migration logic that derives a sensible value for it. */
 const COMPACT_ZERO=["gs","gc","as","ac","susp","inj","wcWins","wcApps","tippyWins",
   "tippyApps","gbWins","fame","eliteYears","topYears","leagueWins","contWins","natCaps"];
+const COMPACT_ZERO_SET=new Set(COMPACT_ZERO);
+/* The old packer stringified the entire world, parsed the result back into a second
+   complete object graph, mutated that copy and then stringified it again: three full
+   passes over a couple of megabytes plus a throwaway clone of every player, team and
+   fixture, on EVERY autosave. On a mature career that was over forty percent of the
+   cost of playing a matchday.
+
+   Only the player records are edited, and only by dropping keys, so a shallow copy of
+   G with a freshly built players array is enough. Nothing below mutates anything it
+   shares with G, so the shared nested references are safe to hand to stringify. */
 function serializeSave(){
- const flat=JSON.stringify(G);
- const g=JSON.parse(flat);
+ const g={};
+ for(const k in G)g[k]=G[k];
  g._compact=1;
- g.players.forEach(p=>{
-   COMPACT_ZERO.forEach(k=>{if(!p[k])delete p[k]});
-   delete p.seasonClub;                       // rebuilt at every season end
-   if(p.careerSeeded)delete p.careerSeeded;   // restored to 1 on expand
-   if(p.history&&!p.history.length)delete p.history;
+ g.players=G.players.map(p=>{
+   const o={};
+   for(const k in p){
+     const v=p[k];
+     if(k==="seasonClub")continue;              // rebuilt at every season end
+     if(k==="careerSeeded"&&v)continue;         // restored to 1 on expand
+     if(k==="history"&&v&&!v.length)continue;   // restored to [] on expand
+     if(!v&&COMPACT_ZERO_SET.has(k))continue;
+     o[k]=v;
+   }
+   return o;
  });
  delete g._topWage;                           // pure cache
  delete g._rndRecordOpen;                     // pure UI state
@@ -1012,6 +1041,9 @@ function expandCompactSave(g){
  g.players.forEach(p=>{
    COMPACT_ZERO.forEach(k=>{if(p[k]===undefined)p[k]=0});
    if(p.careerSeeded===undefined)p.careerSeeded=1;
+   // An empty career is dropped on the way out; without this it came back undefined,
+   // so a save and a reload produced two different shapes for the same player.
+   if(p.history===undefined)p.history=[];
  });
  return g;
 }
@@ -1218,8 +1250,11 @@ function hydrateLoadedG(){
  G.players.forEach(p=>seedCareerRecord(p));
  G.players.forEach(p=>{if(typeof p.fame!=="number"||isNaN(p.fame))p.fame=fameSeed(p)});
  G.players.forEach(p=>{if(typeof p.fame==="number")p.fame=Math.min(p.fame,fameCareerCeil(p));});
- // inflation index: an older save simply starts its clock now
- G.players.forEach(p=>{if(p.natDuty)delete p.natDuty;});
+ // Call-ups used to be wiped on every load. They are drawn a round in advance, so a
+ // president who did not like his call-ups could reload and have his men back - and a
+ // save taken in the transfer window came back with the opening round's call-ups gone.
+ // They are cleared and redrawn at the proper moments instead.
+ if(G.pendingCup===undefined)G.pendingCup=null;
  rndState();if(!G.rnd.offers.length&&!G.rnd.active.length)rndDrawOffers();
  if(typeof G.infl!=="number"||!isFinite(G.infl)||G.infl<=0)G.infl=1;
  if(typeof G.inflRate!=="number"||!isFinite(G.inflRate))G.inflRate=INFL_BASE;
@@ -1255,6 +1290,16 @@ function hydrateLoadedG(){
    const low=G.teams.filter(t=>t.region===reg&&t.tier===2).sort((a,b)=>
      squadOf(a).reduce((s,p)=>s+p.ovr,0)-squadOf(b).reduce((s,p)=>s+p.ovr,0));
    G.userTeam=low.length?low[0].id:G.teams[0].id;
+ }
+ // A pending cup round that no longer has a tie behind it (an edited save, a career
+ // imported from a build without the split step) would otherwise wedge the season on a
+ // button that never resolves. Settle the round and move on.
+ // The only valid pending mark is the round just played, so anything else is a save
+ // that has been edited or written by a different build. A mark with a real tie behind
+ // it is left alone; one with nothing behind it is settled so the cup stays in step.
+ if(G.pendingCup!=null){
+   if(G.pendingCup!==G.matchday||!ALL_CUP_MARKS.includes(G.pendingCup))G.pendingCup=null;
+   else if(!userCupTieAt(G.pendingCup)){try{playCupRound();}catch(e){}G.pendingCup=null;}
  }
  // last: straighten out every ownership invariant the rest of the game assumes
  const fixed=repairWorld();
@@ -1409,6 +1454,13 @@ function averageRival(){
 function nextOpponent(){
  // The actual next fixture: whichever of the league game or a cup tie plays first.
  // Returns {strength, tac, name, homeAdv, comp} or null in the off-season.
+ // A deferred cup tie IS the next contest: the league round it shared a week with has
+ // already been played, so the coach and the tactics screen must look at the cup.
+ if(G.pendingCup){
+   const pg=userCupTieAt(G.pendingCup);
+   if(pg&&T(pg.opp))return{strength:strength(autoXI(T(pg.opp),"4-4-2")),tac:teamTac(pg.opp),
+     name:T(pg.opp).name,homeAdv:pg.home?3:0,comp:"cup"};
+ }
  if(G.matchday>=SEASON_LEN)return null;
  // league opponent this matchday
  let league=null;
@@ -1770,7 +1822,29 @@ function playMatchday(){
  maybeInjury();
  maybeEvent();
  aiTransfers();
- if(ALL_CUP_MARKS.includes(G.matchday))playCupRound();
+ // A league round and a cup round used to resolve on the same tap, which meant two
+ // results and two toasts arriving on top of each other. A cup tie the president is
+ // actually IN now gets its own sim step and its own toast. Rounds he has no stake in
+ // (bye week, knocked out, cup already won) still settle here, so a president out of
+ // the cup never sees an extra button.
+ if(ALL_CUP_MARKS.includes(G.matchday)){
+   if(userCupTieAt(G.matchday)){
+     G.pendingCup=G.matchday;
+     // Deliberately NOT calling endRoundTick here: the call-ups drawn last round cover
+     // this week's cup tie too, and clearing them now would hand the president back a
+     // player his country had taken.
+     checkBadges();
+     integrityGuard("matchday");
+     saveGame(true);
+     return;
+   }
+   playCupRound();
+ }
+ endRoundTick();
+}
+/* Everything that closes out a week of football. Split out of playMatchday so a
+   deferred cup tie can run it after the cup rather than before. */
+function endRoundTick(){
  // No call-ups are drawn after the final league match. The Conrad Cup is played
  // immediately afterwards using teamXI, so a call-up issued here made men unavailable
  // for a tournament that has no "next round" to miss.
@@ -1779,6 +1853,17 @@ function playMatchday(){
  checkBadges();
  integrityGuard("matchday");
  saveGame(true);
+}
+/* The second half of a cup week. Returns false when there is nothing pending, so a
+   caller can drive a whole season without checking first. */
+function playPendingCupRound(){
+ if(!G.pendingCup)return false;
+ G.pendingCup=null;
+ // a delegated coach picks again for the cup: different opponent, different side
+ if(G.coachAuto&&coachTier()>0){coachRunSetup();G._coachPlanKey=coachPlanKey();}
+ playCupRound();
+ endRoundTick();
+ return true;
 }
 
 /* ---- economy ---- */
@@ -2328,7 +2413,9 @@ function nextHomeFixture(){
  }
  let cup=null;
  if(G.cup&&G.cup.userGames){
-   const g=G.cup.userGames.find(x=>!x.played&&!x.rest&&x.home&&x.opp!=null&&x.md>G.matchday);
+   // >= not >: a deferred cup tie sits on the matchday just played, and it is still
+   // the next home occasion. An already-played tie is excluded by !x.played anyway.
+   const g=G.cup.userGames.find(x=>!x.played&&!x.rest&&x.home&&x.opp!=null&&x.md>=G.matchday);
    if(g)cup={md:g.md,opp:g.opp,cupStage:G.cup.phase==="ko"?G.cup.koStage:0};
  }
  if(league&&cup)return league.md<=cup.md?league:cup;
@@ -3742,6 +3829,15 @@ function cupScheduleUser(){
    else c.userGames.push({md:CUP_GROUP_MARKS[r],round:grTag(r),rest:true,played:false});
  }
 }
+/* The cup tie the president is actually due to play on a given cup mark, or null.
+   A bye week, an elimination, a finished cup and a tie already played all return null,
+   which is what keeps a president with no stake in the round from ever being shown a
+   cup button: his round resolves inside the league sim exactly as it always did. */
+function userCupTieAt(mark){
+ const c=G.cup;
+ if(!c||c.winner!==null||c.userOut||G.userTeam==null)return null;
+ return (c.userGames||[]).find(g=>g.md===mark&&!g.rest&&!g.played&&g.opp!=null)||null;
+}
 function gsort(ids){
  return ids.slice().sort((a,b)=>{const A=G.cup.gst[a],B=G.cup.gst[b];
    return B.Pts-A.Pts||(B.GF-B.GA)-(A.GF-A.GA)||B.GF-A.GF});}
@@ -4138,6 +4234,7 @@ function endSeason(){
  checkBadges();
  G.bombDone=null;
  G.matchday=0;G.season++;G.lastResults=null;G.xi=null;G.results=[];
+ G.pendingCup=null;        // the final is played before the turnover; belt and braces
  G.regionalWinners=null;   // per-season cache, must not carry into the new campaign
  G.scouted={};G.refused={};G.window={day:1,offersMade:0};G.offers=[];genOffers();
  G.superShort=null;if(G.superScout)buildSuperShortlist();
@@ -5913,6 +6010,7 @@ function ordinal(n){const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]
 function upcomingFixture(){
  const t=userTeamObj(),tt=tierClubs(t.region,t.tier);
  const li=tt.indexOf(G.userTeam);const fx=G.fixtures[G.matchday];
+ if(!fx)return null;      // past the last round of the season: there is no next fixture
  for(const[i,j]of fx){if(i===li||j===li)return{home:i===li,opp:T(tt[i===li?j:i]).name}}
  return null;
 }
@@ -5954,6 +6052,19 @@ function viewClub(w){
    }
  }
 
+ // The league result card above only ever knows about the league. Now that a cup tie
+ // is played on its own tap, its scoreline deserves the same treatment.
+ {const cg=(G.cup&&G.cup.userGames||[]).filter(x=>x.played&&!x.rest&&x.gf!=null);
+  const last=cg.length?cg[cg.length-1]:null;
+  if(last&&last.md===G.matchday&&!G.pendingCup){
+    const res=last.gf>last.ga?"res-w":last.gf<last.ga?"res-l":"res-d";
+    const tag=last.gf>last.ga?"WON":last.gf<last.ga?"LOST":"DREW";
+    w.appendChild($(`<div class="card center" style="border-color:var(--grana)">
+      <div class="lbl">${cupLabel(t.region)} \u00B7 ${last.round} \u00B7 ${last.home?"Home":"Away"} vs ${T(last.opp)?T(last.opp).name:"\u2014"}</div>
+      <div class="scoreline ${res}">${last.gf} \u2013 ${last.ga}</div>
+      <div class="small ${res}" style="font-weight:700">${tag}${last.pens?" ON PENALTIES":""}</div></div>`));
+  }}
+
  const retirees=squadOf(t).filter(p=>p.age>=40);
  if(retirees.length)
    w.appendChild($(`<div class="card small"><span class="ret">R</span>
@@ -5972,17 +6083,27 @@ function viewClub(w){
    bm.onclick=()=>{TAB="transfers";render()};w.appendChild(bm);
    const bd=$(`<button class="btn">${G.window.day>=3?"Close window and start the season":"Advance to Window Day "+(G.window.day+1)}</button>`);
    bd.onclick=()=>advanceWindowDay();w.appendChild(bd);
+ }else if(G.pendingCup){
+   // The league round of this week is in the books. The cup tie is its own tap.
+   const g=userCupTieAt(G.pendingCup);
+   const opp=g&&T(g.opp)?T(g.opp).name:"\u2014";
+   w.appendChild($(`<div class="card row"><div class="lbl">${cupLabel(t.region)}</div>
+     <div>${g?`<b>${g.home?"Home":"Away"}</b> vs ${opp}`:opp}</div></div>`));
+   const b=$(`<button class="btn cup">Play the ${g?g.round:CUP+" round"}</button>`);
+   b.onclick=()=>{playPendingCupRound();render()};
+   w.appendChild(b);
+   w.appendChild($(`<div class="small muted center" style="margin-top:6px">Matchday ${G.matchday} is settled. Rotate the side or change your dials before the cup tie if you want to.</div>`));
  }else if(G.matchday<SEASON_LEN){
    const nx=upcomingFixture();
    w.appendChild($(`<div class="card row"><div class="lbl">Next fixture</div>
      <div>${nx?`<b>${nx.home?"Home":"Away"}</b> vs ${nx.opp}`:`<span class="muted">League bye \u00B7 rest week</span>`}</div></div>`));
-   // a cup round plays AFTER this matchday if (matchday+1) is a cup mark
-   const cupMark=ALL_CUP_MARKS.includes(G.matchday+1);
-   const b=$(`<button class="btn ${cupMark?'cup':'league'}">${cupMark
-     ?`Play Matchday ${G.matchday+1} + ${CUP} round`
-     :`Play League Matchday ${G.matchday+1}`}</button>`);
+   // a cup tie of YOURS follows this matchday on its own tap; a round you have no
+   // stake in still settles inside the league sim and is never mentioned here
+   const cupNext=ALL_CUP_MARKS.includes(G.matchday+1)&&!!userCupTieAt(G.matchday+1);
+   const b=$(`<button class="btn league">Play League Matchday ${G.matchday+1}</button>`);
    b.onclick=()=>{playMatchday();render()};
    w.appendChild(b);
+   if(cupNext)w.appendChild($(`<div class="small center" style="margin-top:6px;color:#ff9dc0">Your ${cupLabel(t.region)} tie follows, on its own.</div>`));
    w.appendChild($(`<div class="small muted center" style="margin-top:6px">
      <span style="color:#e0b93a">\u25A0</span> League \u00B7
      <span style="color:#d1447f">\u25A0</span> ${cupLabel(t.region)} \u00B7
@@ -7296,30 +7417,47 @@ function viewCup(w){
  if(anyHist){
    const hc=$(`<div class="card"></div>`);
    hc.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Cup history</h3>`));
+   // Five equal columns that shrink with the card. The old flex row used padded
+   // auto-width buttons, which cannot shrink below their text and so ran off the
+   // right-hand edge of a phone once the fifth competition had a winner.
    const tabs=[["world","World",G.cups.world.length],
                ["tippy","Tippy",(G.cups.tippy||[]).length],
                ["continental","Conrad",G.cups.continental.length],
-               ["super","Super",(G.cups.super||[]).length],
+               ["super","May 1st",(G.cups.super||[]).length],
                ["regional","Regional",G.cups.regional.length]].filter(t=>t[2]>0);
    if(!tabs.find(t=>t[0]===CUPHIST_TAB))CUPHIST_TAB=tabs[0][0];
-   const row=$(`<div class="row" style="gap:6px;margin-bottom:8px"></div>`);
+   const row=$(`<div class="tabgrid" style="grid-template-columns:repeat(${tabs.length},minmax(0,1fr))"></div>`);
    tabs.forEach(([key,label])=>{
-     const b=$(`<button class="btn sm ${CUPHIST_TAB===key?'':'sec'}" style="flex:1">${label}</button>`);
+     const b=$(`<button class="btn sm ${CUPHIST_TAB===key?'':'sec'}">${label}</button>`);
      b.onclick=()=>{CUPHIST_TAB=key;render()};
      row.appendChild(b);
    });
    hc.appendChild(row);
+   // A career runs for decades, so the list is capped and scrolls inside the card
+   // rather than growing the page by one row a season forever.
+   const HIST_MAX=40;
+   const list=$(`<div class="histscroll"></div>`);
+   const line=(l,r)=>list.appendChild($(`<div class="logline"><span class="muted">${l}</span><span class="gold">${r}</span></div>`));
+   let all;
    if(CUPHIST_TAB==="world"){
-     G.cups.world.slice().reverse().forEach(e=>hc.appendChild($(`<div class="logline"><span class="muted">Season ${e.season}</span><span class="gold">${e.champion}</span></div>`)));
+     all=G.cups.world.slice().reverse();
+     all.slice(0,HIST_MAX).forEach(e=>line(`Season ${e.season}`,e.champion));
    }else if(CUPHIST_TAB==="tippy"){
-     (G.cups.tippy||[]).slice().reverse().forEach(e=>hc.appendChild($(`<div class="logline"><span class="muted">Season ${e.season}</span><span class="gold">${e.champion}</span></div>`)));
+     all=(G.cups.tippy||[]).slice().reverse();
+     all.slice(0,HIST_MAX).forEach(e=>line(`Season ${e.season}`,e.champion));
    }else if(CUPHIST_TAB==="continental"){
-     G.cups.continental.slice().reverse().forEach(e=>hc.appendChild($(`<div class="logline"><span class="muted">Season ${e.season}</span><span class="gold">${e.winner}</span></div>`)));
+     all=G.cups.continental.slice().reverse();
+     all.slice(0,HIST_MAX).forEach(e=>line(`Season ${e.season}`,e.winner));
    }else if(CUPHIST_TAB==="super"){
-     (G.cups.super||[]).slice().reverse().forEach(e=>hc.appendChild($(`<div class="logline"><span class="muted">S${e.season} \u00B7 ${regionOf(e.region)?regionOf(e.region).name:"\u2014"}</span><span class="gold">${e.winner}</span></div>`)));
+     all=(G.cups.super||[]).slice().reverse();
+     all.slice(0,HIST_MAX).forEach(e=>line(`S${e.season} \u00B7 ${regionOf(e.region)?regionOf(e.region).name:"\u2014"}`,e.winner));
    }else{
-     G.cups.regional.slice().reverse().slice(0,18).forEach(e=>hc.appendChild($(`<div class="logline"><span class="muted">S${e.season} \u00B7 ${regionOf(e.region).name}</span><span class="gold">${e.winner}</span></div>`)));
+     all=G.cups.regional.slice().reverse();
+     all.slice(0,HIST_MAX).forEach(e=>line(`S${e.season} \u00B7 ${regionOf(e.region)?regionOf(e.region).name:"\u2014"}`,e.winner));
    }
+   hc.appendChild(list);
+   if(all.length>HIST_MAX)
+     hc.appendChild($(`<div class="small muted" style="margin-top:6px">Showing the last ${HIST_MAX} of ${all.length}.</div>`));
    w.appendChild(hc);
  }
 }
