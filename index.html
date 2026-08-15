@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Empire FC 2</title>
+<title>Empire FC</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -310,7 +310,7 @@ const SCOUT_TIERS={   // roster reveal cost per club, resets each season
   silver:{label:"Silver Scout",cost:250000,pot:true,wage:16000},
   gold:{label:"Gold Scout",cost:100000,pot:true,wage:30000}};
 const XFER_PER_OVR=1000000;
-const REGION_CUP={deseret:"The Liahona Cup",kauai:"The Napali Cup",founders:"The Brainrot Cup"};
+const REGION_CUP={deseret:"The Liahona Cup",kauai:"The Napali Cup",founders:"The Brainrot Cup",guarani:"The Copa Paraguay"};
 function cupName(regionKey){return REGION_CUP[regionKey||userRegionKey()]||"Regional Cup";}
 Object.defineProperty(globalThis,"CUP",{get(){try{return G&&G.userTeam!=null?cupName(userRegionKey()):"Regional Cup"}catch(e){return "Regional Cup"}}});
 const CONT_CUP="The Conrad Cup";
@@ -1232,6 +1232,9 @@ function hydrateLoadedG(){
  if(!G.window)G.window={day:4,offersMade:0};
  if(!G.offers)G.offers=[];
  if(G.saga===undefined)G.saga=null;
+ // Presidency ledger arrived with club switching; older careers are one unbroken spell.
+ if(!Array.isArray(G.presidency))G.presidency=[];
+ presidency();
  // Super Cup arrived with the fourth region; older careers have no slot for it.
  if(G.cups&&!Array.isArray(G.cups.super))G.cups.super=[];
  if(G.superLive===undefined)G.superLive=null;
@@ -1283,8 +1286,8 @@ function exportSave(){
  // to a plain download on desktop or where sharing files isn't supported.
  let file=null;try{file=new File([blob],fname,{type:"application/json"});}catch(e){}
  if(file&&navigator.canShare&&navigator.canShare({files:[file]})&&navigator.share){
-   navigator.share({files:[file],title:"Empire FC 2 save",
-     text:`Empire FC 2 backup \u2014 ${userTeamObj().name}, Season ${G.season}`})
+   navigator.share({files:[file],title:"Empire FC save",
+     text:`Empire FC backup \u2014 ${userTeamObj().name}, Season ${G.season}`})
      .then(()=>toast("Backup shared. Keep it somewhere safe."))
      .catch(err=>{if(!err||err.name!=="AbortError")downloadBlob(blob,fname);});
    return;
@@ -1308,8 +1311,8 @@ function importSaveText(text){
  // previous game is left untouched.
  let g;
  try{g=JSON.parse(text);}
- catch(e){return{ok:false,msg:"That file isn't valid JSON \u2014 not an Empire FC 2 save."};}
- if(!g||typeof g!=="object")return{ok:false,msg:"That file isn't an Empire FC 2 save."};
+ catch(e){return{ok:false,msg:"That file isn't valid JSON \u2014 not an Empire FC save."};}
+ if(!g||typeof g!=="object")return{ok:false,msg:"That file isn't an Empire FC save."};
  if(g.ver!==4)return{ok:false,msg:"That save is from an incompatible version and can't be loaded."};
  scrubSaveStrings(g,0);                // untrusted file: strip anything that could inject markup
  expandCompactSave(g);                 // restore the fields compact serialization dropped
@@ -2008,6 +2011,68 @@ function sagaScore(saga,teamId,wageOffered){
  let sc=0;saga.wants.forEach((k,i)=>{sc+=f[k]*[1,0.65,0.4][i];});
  return sc+f.money*0.25;                       // money always counts for something
 }
+/* ---- The president's own career, as distinct from any one club's ----
+   A president can walk away from a club and take charge of another. What he has won
+   travels with him; what the club has won stays on its own shelf. This ledger is the
+   only place that distinction is recorded, so every multi-club badge reads from here. */
+function presidency(){
+ if(!Array.isArray(G.presidency))G.presidency=[];
+ if(!G.presidency.length&&G.userTeam!=null&&T(G.userTeam))
+   G.presidency.push({teamId:G.userTeam,name:T(G.userTeam).name,from:G.season||1,to:null,
+     league:0,cup:0,conrad:0,may1:0,may1App:0});
+ return G.presidency;
+}
+function currentSpell(){const p=presidency();return p.length?p[p.length-1]:null;}
+/* Credit a trophy to the man in the chair as well as to the club. */
+function creditPresident(kind){
+ const sp=currentSpell();if(!sp)return;
+ sp[kind]=(sp[kind]||0)+1;
+}
+function presidentTotals(){
+ const p=presidency();
+ const t={clubs:p.length,league:0,cup:0,conrad:0,may1:0,may1App:0,
+   leagueClubs:new Set(),cupClubs:new Set(),conradClubs:new Set(),may1Clubs:new Set()};
+ p.forEach(sp=>{
+   t.league+=sp.league||0;t.cup+=sp.cup||0;t.conrad+=sp.conrad||0;
+   t.may1+=sp.may1||0;t.may1App+=sp.may1App||0;
+   if(sp.league)t.leagueClubs.add(sp.teamId);
+   if(sp.cup)t.cupClubs.add(sp.teamId);
+   if(sp.conrad)t.conradClubs.add(sp.teamId);
+   if(sp.may1)t.may1Clubs.add(sp.teamId);
+ });
+ return t;
+}
+/* Leaving is permanent and costs everything that was personal to the old job: the
+   shortlist, the scouting reports, the offers on the table. The club carries on
+   without you, with its squad, its money and its trophies untouched. */
+function canSwitchClub(){
+ // only between seasons, once the campaign is fully settled
+ return G.matchday===0&&!G.contLive&&!G.superLive;
+}
+function switchClub(newId){
+ const t=T(newId);if(!t||newId===G.userTeam)return false;
+ const sp=currentSpell();
+ if(sp){sp.to=G.season-1;}
+ G.presidency.push({teamId:newId,name:t.name,from:G.season,to:null,
+   league:0,cup:0,conrad:0,may1:0,may1App:0});
+ G.userTeam=newId;
+ // everything below belonged to the old job and must not follow you
+ G.xi=null;G.scouted={};G.refused={};G.offers=[];G.superShort=null;
+ G.saga=null;G.coach=null;G.coachAuto=false;G._coachPlanKey=null;
+ G.liaisonCycle=null;G.myStaff={};
+ G.badgeStats=G.badgeStats||{};
+ G.badgeStats.startTier=t.tier;G.badgeStats.hitBottom=false;
+ G.window={day:1,offersMade:0};
+ resetUiState();
+ initCup();cupScheduleUser();genOffers();
+ ensureXI();
+ awardBadge("journeyman");
+ (G.news=G.news||[]).unshift({season:G.season,
+   text:`${G.owner} leaves ${sp?sp.name:"his club"} to take charge at ${t.name}.`});
+ logAdd(`You took charge at ${t.name}.`);
+ saveGame(true);
+ return true;
+}
 function startSaga(p){
  if(!p||p.team==null)return;
  const wants=shuffle(SAGA_KEYS.slice()).slice(0,3);
@@ -2303,19 +2368,12 @@ function shoeMark(t){return t&&t.sponsor?` <span class="shoe" title="${brandInfo
 function openBrandInTier(tier){return SHOE_TIERS[tier].brands.find(b=>brandHolders(b.key).length<SHOE_SLOTS)||null;}
 function shoeRecent(t,win){const s=G.season-(win||6);return{
  conrad:(G.cups.continental||[]).filter(e=>e.winner===t.name&&e.region===t.region&&e.season>=s).length,
- spr:(G.cups.super||[]).filter(e=>e.winner===t.name&&e.region===t.region&&e.season>=s).length,
  regional:(G.cups.regional||[]).filter(e=>e.winner===t.name&&e.region===t.region&&e.season>=s).length,
  league:(t.leagueTitleSeasons||[]).filter(x=>x>=s).length,
  gb:(G.gbLog||[]).filter(e=>e.team===t.id&&e.season>=s).length};}
-function shoeResume(t){const r=shoeRecent(t,6);return(t.prestige||0)+r.conrad*15+r.spr*10+r.regional*6+r.league*8+r.gb*5;}
-/* Super Cups are now a hard gate rather than one signal among several: a top-tier brand
-   wants three of them, a mid-tier brand wants one. They are counted over a club's whole
-   history, not the recent window, because a shoe company is buying the name on the
-   trophy and that does not expire the way recent form does. */
-const SHOE_SUPER_REQ={gold:3,silver:1,bronze:0};
+function shoeResume(t){const r=shoeRecent(t,6);return(t.prestige||0)+r.conrad*15+r.regional*6+r.league*8+r.gb*5;}
 function shoeQualifies(t,tier){
  const pres=t.prestige||0,r=shoeRecent(t,6);
- if((t.superTitles||0)<(SHOE_SUPER_REQ[tier]||0))return false;
  if(tier==="gold")  return pres>=SHOE_TIERS.gold.prestige   &&(r.conrad>=1||r.league>=2);
  if(tier==="silver")return pres>=SHOE_TIERS.silver.prestige &&(pres>=55||(r.conrad+r.regional+r.league+r.gb)>=1);
  if(tier==="bronze")return pres>=SHOE_TIERS.bronze.prestige;
@@ -2493,8 +2551,24 @@ const BADGES=[
  {id:"clean_sweep",name:"Clean Sweep",desc:"Win league + regional cup in the same season"},
  {id:"group_heroes",name:"Group Stage Heroes",desc:"Qualify from a cup group as a best third-place team"},
  // conrad
- {id:"super_qual",name:"Champion of Champions",desc:"Qualify for the Super Cup by winning your regional cup"},
- {id:"super_win",name:"Best of the Best",desc:"Win the Super Cup"},
+ /* ---- May 1st Cup ---- */
+ {id:"super_qual",name:"Champion of Champions",desc:"Reach the May 1st Cup by winning your regional cup"},
+ {id:"may1_app3",name:"Regular Guest",desc:"Reach the May 1st Cup 3 times"},
+ {id:"may1_app5",name:"Fixture of the First",desc:"Reach the May 1st Cup 5 times"},
+ {id:"may1_app10",name:"Perennial",desc:"Reach the May 1st Cup 10 times"},
+ {id:"super_win",name:"Best of the Best",desc:"Win the May 1st Cup"},
+ {id:"may1_win3",name:"May Dynasty",desc:"Win the May 1st Cup 3 times"},
+ {id:"may1_win5",name:"Lord of the First",desc:"Win the May 1st Cup 5 times"},
+ /* ---- the president's own career, across every club he has run ---- */
+ {id:"journeyman",name:"Journeyman",desc:"Take charge of a second club"},
+ {id:"nomad",name:"Nomad",desc:"Preside over 3 different clubs"},
+ {id:"wanderer",name:"Eternal Wanderer",desc:"Preside over 5 different clubs"},
+ {id:"two_league",name:"Twice a Champion",desc:"Win a league title with 2 different clubs"},
+ {id:"three_league",name:"Kingmaker",desc:"Win a league title with 3 different clubs"},
+ {id:"two_cup",name:"Cup Collector",desc:"Win a regional cup with 2 different clubs"},
+ {id:"two_conrad",name:"Continental Nomad",desc:"Win the Conrad Cup with 2 different clubs"},
+ {id:"two_may1",name:"May Twice Over",desc:"Win the May 1st Cup with 2 different clubs"},
+ {id:"builder_legacy",name:"Legacy Builder",desc:"Win a trophy of any kind with 3 different clubs"},
  {id:"cont_qual",name:"Continental Qualification",desc:"Qualify for the Conrad Cup"},
  {id:"conrad_contender",name:"Conrad Contender",desc:"Reach the Conrad Cup semi-finals"},
  {id:"conrad_champions",name:"Conrad Champions",desc:"Win the Conrad Cup",f:(t)=>(t.contTitles||0)>=1},
@@ -2622,6 +2696,24 @@ function checkBadges(){
  const bs=G.badgeStats||{};
  if(bs.hitBottom&&(t.contTitles||0)>=1)awardBadge("phoenix");
  // ---- Empire FC 2 squad/academy/market badges ----
+ // ---- the president's own career ----
+ {const pt=presidentTotals();
+  if(pt.clubs>=2)awardBadge("journeyman");
+  if(pt.clubs>=3)awardBadge("nomad");
+  if(pt.clubs>=5)awardBadge("wanderer");
+  if(pt.leagueClubs.size>=2)awardBadge("two_league");
+  if(pt.leagueClubs.size>=3)awardBadge("three_league");
+  if(pt.cupClubs.size>=2)awardBadge("two_cup");
+  if(pt.conradClubs.size>=2)awardBadge("two_conrad");
+  if(pt.may1Clubs.size>=2)awardBadge("two_may1");
+  const anyClub=new Set([...pt.leagueClubs,...pt.cupClubs,...pt.conradClubs,...pt.may1Clubs]);
+  if(anyClub.size>=3)awardBadge("builder_legacy");
+  if(pt.may1App>=3)awardBadge("may1_app3");
+  if(pt.may1App>=5)awardBadge("may1_app5");
+  if(pt.may1App>=10)awardBadge("may1_app10");
+  if(pt.may1>=3)awardBadge("may1_win3");
+  if(pt.may1>=5)awardBadge("may1_win5");
+ }
  {const hasIcon=squadOf(t).some(isIcon);
   if(hasIcon&&bs.iconSince==null)(G.badgeStats=G.badgeStats||{}).iconSince=G.season;
   if(!hasIcon)delete (G.badgeStats||{}).iconSince;}
@@ -3815,7 +3907,8 @@ function endSeason(){
  });
  // record league + cup titles
  REGIONS.forEach(r=>{const ch=RT[r.key][0][0];ch.leagueTitles++;
-   (ch.leagueTitleSeasons=ch.leagueTitleSeasons||[]).push(G.season);});
+   (ch.leagueTitleSeasons=ch.leagueTitleSeasons||[]).push(G.season);
+   if(ch.id===G.userTeam)creditPresident("league");});
  // Every regional cup, the user's included, is decided here at the latest: before
  // promotion, relegation and expulsion, so a club thrown out of the pyramid can never
  // be credited with the trophy. If the Super Cup already forced the resolution earlier
@@ -4217,7 +4310,7 @@ function contQualifiers(RT){
 /* ---- The Super Cup: the four regional cup winners, played after the Conrad Cup ----
    Two rounds, four clubs, and the same round-by-round experience a president gets in
    the Conrad Cup when he qualifies for it. */
-const SUPER_CUP="The Super Cup";
+const SUPER_CUP="The May 1st Cup";
 const SUPER_ROUNDS=["Semifinal","Final"];
 const SUPER_PRIZE=[700000,1400000];
 const SUPER_TITLE_BONUS=2000000;
@@ -4235,6 +4328,7 @@ function ensureRegionalWinners(){
      if(w!=null&&T(w)){
        T(w).cupTitles=(T(w).cupTitles||0)+1;
        G.cups.regional.push({season:G.season,region:r.key,winner:T(w).name});
+       if(w===G.userTeam)creditPresident("cup");
      }
      byRegion[r.key]=w;
    }else{
@@ -4281,6 +4375,7 @@ function superFinish(st){
    T(winner).prestige=clamp((T(winner).prestige||0)+4,0,PRESTIGE_MAX);
    (G.cups.super=G.cups.super||[]).push({season:G.season,winner:T(winner).name,region:T(winner).region});
    if(winner===G.userTeam){
+     creditPresident("may1");
      const bonus=IN(SUPER_TITLE_BONUS);
      T(G.userTeam).budget+=bonus;
      logAdd(`${SUPER_CUP}: CHAMPIONS of the Super Cup!`,bonus);
@@ -4296,13 +4391,15 @@ function runSuperCup(){
  if(q.length<2){G.lastSuper=null;return;}
  const st={alive:shuffle(q.slice()),round:0,log:[],qualified:q.includes(G.userTeam),
    userOut:!q.includes(G.userTeam),finished:false};
+ // an appearance counts whether it was played by hand or simulated
+ if(st.qualified){awardBadge("super_qual");creditPresident("may1App");}
  while(!st.finished)superPlayRound(st);
 }
 function startSuperCup(){
  const q=superQualifiers();
  G.superLive={alive:shuffle(q.slice()),round:0,log:[],qualified:q.includes(G.userTeam),
    userOut:!q.includes(G.userTeam),finished:false};
- if(G.superLive.qualified)awardBadge("super_qual");
+ if(G.superLive.qualified){awardBadge("super_qual");creditPresident("may1App");}
  saveGame(true);
 }
 function contPlayRound(st){
@@ -4335,7 +4432,7 @@ function contFinish(st){
  const winner=st.alive[0];
  if(winner!=null&&T(winner)){T(winner).contTitles=(T(winner).contTitles||0)+1;
    G.cups.continental.push({season:G.season,winner:T(winner).name,region:T(winner).region});
-   if(winner===G.userTeam)logAdd(`${CONT_CUP}: CHAMPIONS of the Conrad Cup!`,2500000),T(G.userTeam).budget+=2500000;
+   if(winner===G.userTeam){creditPresident("conrad");logAdd(`${CONT_CUP}: CHAMPIONS of the Conrad Cup!`,2500000);T(G.userTeam).budget+=2500000;}
  }
  // prestige for the champion is applied in endSeason, after the seasonal decay,
  // so interactive and simulated cups reward identically
@@ -5444,7 +5541,7 @@ function render(){
  ensureXI();
  app.innerHTML="";
  app.appendChild($(`<header>${crestSVG()}
-   <div class="t"><h1>Empire FC 2</h1>
+   <div class="t"><h1>Empire FC</h1>
    <div class="sub">Season ${G.season} \u00B7 Matchday ${Math.min(G.matchday+1,SEASON_LEN)}/${SEASON_LEN} \u00B7 ${G.owner}</div></div></header>`));
  const wrap=$(`<div class="wrap"></div>`);
  // A standing warning when the browser has stopped accepting the autosave. Until now a
@@ -5489,7 +5586,7 @@ function renderStart(){
  app.innerHTML="";
  const s=$(`<div class="start"></div>`);
  s.appendChild($(`<div class="center" style="margin-bottom:6px">${crestSVG()}</div>`));
- s.appendChild($(`<h1 class="center" style="font-size:26px;color:var(--honey)">Empire FC 2</h1>`));
+ s.appendChild($(`<h1 class="center" style="font-size:26px;color:var(--honey)">Empire FC</h1>`));
 
  if(localStorage.getItem(SAVE_KEY)&&(!G||G.userTeam===null)){
    const cont=$(`<button class="btn" style="margin-bottom:10px">Continue saved game</button>`);
@@ -5655,6 +5752,54 @@ function bettingCard(){
   card.appendChild(hist);}
  return card;
 }
+/* The president's own record, and the only way to leave a club. Deliberately gated to
+   the close season and hidden behind a confirmation: walking out is permanent, and a
+   president who does it by accident has lost his squad, his staff and his shortlist. */
+function presidencyCard(){
+ const card=$(`<details class="card" style="padding:10px"></details>`);
+ const p=presidency(),pt=presidentTotals();
+ card.appendChild($(`<summary style="cursor:pointer;font-weight:700;font-size:15px">\uD83E\uDD35 Your presidency \u00B7 <span class="gold">${pt.clubs}</span> club${pt.clubs===1?"":"s"}</summary>`));
+ card.appendChild($(`<div class="small muted" style="margin:8px 0">${G.owner}\u2019s record across every club he has run. Trophies stay with the club; the record travels with you.</div>`));
+ p.slice().reverse().forEach(sp=>{
+   const span=sp.to==null?`S${sp.from}\u2013now`:`S${sp.from}\u2013S${sp.to}`;
+   const won=[sp.league?`${sp.league} league`:"",sp.cup?`${sp.cup} cup`:"",
+     sp.conrad?`${sp.conrad} Conrad`:"",sp.may1?`${sp.may1} May 1st`:""].filter(Boolean).join(" \u00B7 ");
+   card.appendChild($(`<div class="logline"><span>${sp.name} <span class="muted small">${span}</span></span><span class="${won?"gold":"muted"} small">${won||"no silverware"}</span></div>`));
+ });
+ if(pt.may1App)card.appendChild($(`<div class="small muted" style="margin-top:6px">May 1st Cup appearances: <b class="gold">${pt.may1App}</b></div>`));
+ card.appendChild($(`<div class="divider"></div>`));
+ if(!canSwitchClub()){
+   card.appendChild($(`<div class="small muted">You can only take a new job between seasons, once the current campaign is fully settled.</div>`));
+   return card;
+ }
+ card.appendChild($(`<div class="small" style="margin-bottom:6px"><b>Take charge elsewhere</b></div>`));
+ card.appendChild($(`<div class="small muted" style="margin-bottom:8px">Leaving is permanent. You keep nothing but your name and your record: the squad, the money, the staff, your coach, your shortlist and every scouting report stay behind. Any club in the world will have you.</div>`));
+ const regSel=$(`<select style="width:100%;margin-bottom:6px"></select>`);
+ REGIONS.forEach(r=>regSel.appendChild($(`<option value="${r.key}"${r.key===userRegionKey()?" selected":""}>${r.name}</option>`)));
+ const clubSel=$(`<select style="width:100%;margin-bottom:8px"></select>`);
+ const fill=()=>{
+   clubSel.innerHTML="";
+   const rk=regSel.value;
+   [0,1,2].forEach(tier=>tierClubs(rk,tier).forEach(id=>{
+     const t=T(id);if(!t||id===G.userTeam)return;
+     clubSel.appendChild($(`<option value="${id}">${t.name} \u00B7 ${tierName(rk,tier)} \u00B7 prestige ${Math.round(t.prestige||0)}</option>`));
+   }));
+ };
+ regSel.onchange=fill;fill();
+ card.appendChild(regSel);card.appendChild(clubSel);
+ const btn=$(`<button class="btn sec">Resign and take the job</button>`);
+ let armed=false;
+ btn.onclick=()=>{
+   const id=+clubSel.value;const t=T(id);if(!t)return;
+   if(!armed){armed=true;btn.className="btn";
+     btn.textContent=`Confirm: leave ${userTeamObj().name} for ${t.name}`;
+     setTimeout(()=>{if(armed){armed=false;btn.className="btn sec";btn.textContent="Resign and take the job";}},6000);
+     return;}
+   switchClub(id);render();
+ };
+ card.appendChild(btn);
+ return card;
+}
 function badgeCabinetCard(){
  const got=G.badges||{},n=Object.keys(got).length;
  const card=$(`<details class="card" style="padding:10px"></details>`);
@@ -5749,7 +5894,7 @@ function viewClub(w){
  const ovr=Math.round(squadOf(t).reduce((a,p)=>a+p.ovr,0)/t.squad.length);
  w.appendChild($(`<div class="card">
    <div class="row"><h2 style="font-size:21px">${t.name}</h2>${tierTag(t)}</div>
-   <div class="small muted">President ${G.owner} \u00B7 ${regionOf(t.region).name} \u00B7 <span class="gold">${prestigeLabel(t.prestige||0)}</span> (${Math.round(t.prestige||0)})</div>
+   <div class="small muted">${regionOf(t.region).name} \u00B7 <span class="gold">${prestigeLabel(t.prestige||0)}</span> (${Math.round(t.prestige||0)})</div>
    <div class="divider"></div>
    <div class="row">
      <div class="stat"><div class="lbl">Squad</div><div class="big">${ovr}</div></div>
@@ -6175,12 +6320,12 @@ function viewSquad(w){
  sc.appendChild($(`<h3 style="font-size:15px;margin-bottom:8px">Full squad (${userTeamObj().squad.length})</h3>`));
  const rows=squadOf(userTeamObj()).sort((a,b)=>b.ovr-a.ovr).map(p=>
    `<tr><td class="l">${famePill(p)}<span class="pname${isIcon(p)?' goat':''}" data-p="${p.id}">${p.name}</span>${isUnhappy(p)?' <span class="injtag">TRANSFER REQUEST</span>':''}</td><td class="l"><span class="pos ${p.pos}">${p.pos}</span></td>`+
-   `<td>${ageCell(p)}</td><td class="gold">${p.ovr}</td><td>${p.gs||0}</td>`+
+   `<td>${ageCell(p)}</td><td class="gold">${p.ovr}</td><td>${p.pot}</td>`+
    `<td class="small">${money(p.wage)}</td><td class="small ${(p.contract||0)<=1?'res-l':'muted'}">${p.runningDown!=null?"leaving":(p.contract||0)+"y"}</td>`+
    `<td>${p.inj>0?`<span class="injtag">INJ ${p.inj}</span>`:p.susp>0?`<span class="injtag">SUSP</span>`:p.natDuty?`<span class="injtag">CALL-UP</span>`:"\u2713"}</td>`+
    `<td class="act"><button class="btn tiny sec" data-rel="${p.id}">Release</button></td></tr>`).join("");
  const sqt=$(`<table><thead><tr>
-   <th class="l">Player</th><th></th><th>Age</th><th>OVR</th><th>Gls</th><th>Wage</th><th>Deal</th><th>Fit</th><th></th></tr></thead><tbody>${rows}</tbody></table>`);
+   <th class="l">Player</th><th></th><th>Age</th><th>OVR</th><th>POT</th><th>Wage</th><th>Deal</th><th>Fit</th><th></th></tr></thead><tbody>${rows}</tbody></table>`);
  sqt.querySelectorAll("[data-rel]").forEach(b=>b.onclick=e=>{e.stopPropagation();releasePlayer(P(+b.dataset.rel))});
  wireNames(sqt);{const _w=$(`<div class="tscroll"></div>`);_w.appendChild(sqt);sc.appendChild(_w);}
  sc.appendChild($(`<div class="small muted" style="margin-top:6px">Tap a name for full attributes and career stats. Release frees the wage and squad slot at any time, but returns no fee.</div>`));
@@ -6785,18 +6930,15 @@ function viewOffice(w){
     sp.appendChild($(`<div class="small" style="margin-bottom:8px">The liaison is being evaluated by the brands. A pitch comes at season\u2019s end. Where you stand right now:</div>`));
     ["gold","silver","bronze"].forEach(tier=>{
       const q=shoeQualifies(t,tier),open=!!openBrandInTier(tier);
-      // A club blocked purely on Super Cups is told so. Being "out of reach" with no
-      // reason given is the kind of dead end a president cannot plan around.
-      const need=SHOE_SUPER_REQ[tier]||0,have=t.superTitles||0;
-      const shortBy=Math.max(0,need-have);
-      const status=q?(open?'<span class="gold">Interested \u2014 slot open</span>':'<span style="color:var(--draw)">Interested \u2014 must out-do a current club</span>')
-        :shortBy?`<span class="muted">Needs ${shortBy} more ${SUPER_CUP.replace("The ","")}${shortBy===1?"":"s"}</span>`
-        :'<span class="muted">Out of reach</span>';
-      sp.appendChild($(`<div class="small" style="margin-bottom:3px">${SHOE_TIERS[tier].name} (${money(shoeValueOf(tier))}/yr): ${status}${need?` <span class="muted">\u00B7 ${have}/${need} Super Cups</span>`:""}</div>`));
+      const status=q?(open?'<span class="gold">Interested \u2014 slot open</span>':'<span style="color:var(--draw)">Interested \u2014 must out-do a current club</span>'):'<span class="muted">Out of reach</span>';
+      sp.appendChild($(`<div class="small" style="margin-bottom:3px">${SHOE_TIERS[tier].name} (${money(shoeValueOf(tier))}/yr): ${status}</div>`));
     });
     const fb=$(`<button class="btn sm sec" style="margin-top:8px">Release liaison</button>`);fb.onclick=fireLiaison;sp.appendChild(fb);
   }
   w.appendChild(sp);}
+
+ // ---- Your presidency: the clubs you have run, and the door out ----
+ w.appendChild(presidencyCard());
 
  // ---- Prediction market (betting) ----
  w.appendChild(bettingCard());
