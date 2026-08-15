@@ -991,6 +991,20 @@ function repairWorld(){
    if(!p)return;
    if(p.team!=null&&held.get(p.id)!==p.team){p.team=null;orphans++;}
  });
+ // Close any spell left hanging: a player with no club cannot still be "playing" for
+ // one. Covers both the orphans just cut loose and any older save written by a build
+ // whose release paths never closed the spell in the first place.
+ G.players.forEach(p=>{
+   if(!p||!p.history||!p.history.length)return;
+   const h=p.history[p.history.length-1];
+   if(h.out)return;
+   const club=p.team!=null?T(p.team):null;
+   if(!club||h.club!==club.name){
+     h.out=G.season;
+     h.goals=Math.max(0,(p.gc||0)-(h.gcAt||0));
+     h.apps=Math.max(0,(p.ac||0)-(h.acAt||0));
+   }
+ });
  const seen=new Set();
  G.freeAgents=(G.freeAgents||[]).filter(id=>{
    if(seen.has(id)||!byId.has(id)||held.has(id))return false;
@@ -2531,7 +2545,9 @@ function fiveYearBomb(){
    if(!t.scorers)t.scorers={};
    if(!t.scorers[victim.id])t.scorers[victim.id]={name:victim.name,pos:victim.pos,goals:victim.gc||0};
    else t.scorers[victim.id].goals=Math.max(t.scorers[victim.id].goals,victim.gc||0);
+   joinClub(victim,null);                  // close the career spell: he stopped playing here
    t.squad=t.squad.filter(id=>id!==victim.id);
+   t.unhappy=(t.unhappy||[]).filter(id=>id!==victim.id);
    victim.team=null;victim.retired=true;   // gone for good; not recycled to free agents
    if(t.id===G.userTeam&&G.xi)G.xi=G.xi.filter(id=>id!==victim.id);
    const kid=newPlayer(G.nextPid++,victim.pos,16,t.region);
@@ -2716,9 +2732,7 @@ function discontentTick(){
    // a player who has agitated for a full season and is still here walks away free
    const stale=unhappyList(t).filter(p=>(p.unhappySince||G.season)<G.season);
    stale.forEach(p=>{
-     t.squad=t.squad.filter(id=>id!==p.id);
-     t.unhappy=t.unhappy.filter(id=>id!==p.id);
-     p.team=null;delete p.unhappySince;delete p.promised;if(!G.freeAgents.includes(p.id))G.freeAgents.push(p.id);
+     releasePlayerToPool(p);
      if(t.id===G.userTeam){
        logAdd(`${p.name} forced his exit and left on a free transfer. You got nothing for him.`);
        try{toast(`${p.name} walked out on a free.`);}catch(e){}
@@ -2731,11 +2745,7 @@ function discontentTick(){
      if(played){delete p.promised;if(t.id===G.userTeam)awardBadge("kept_promise");return;}   // promise kept
      if(p.promised>=G.season)return;                  // still within his season of grace
      if(t.squad.length<=SQUAD_MIN){delete p.promised;return;}
-     t.squad=t.squad.filter(id=>id!==p.id);
-     t.unhappy=(t.unhappy||[]).filter(id=>id!==p.id);
-     if(G.xi)G.xi=G.xi.filter(id=>id!==p.id);
-     p.team=null;delete p.promised;delete p.unhappySince;
-     if(!G.freeAgents.includes(p.id))G.freeAgents.push(p.id);
+     releasePlayerToPool(p);
      if(t.id===G.userTeam){
        awardBadge("broken_promise");
        logAdd(`${p.name} was promised minutes he never got. He walked out on a free transfer.`);
@@ -2889,12 +2899,14 @@ function contractTick(){
        const dem=wageDemand(p);
        // AI keeps him if the wage bill stays sane for the club's means
        const bill=squadWage(t),afford=t.budget>0&&(bill+dem-p.wage)*SEASON_LEN<Math.max(t.budget*1.6,4e6);
-       if(afford){p.wage=dem;p.contract=newContractYears();}
+       if(afford){p.wage=dem;p.contract=newContractYears();markWagesDirty();}
        else{
-         G.teams.forEach(tt=>{tt.squad=tt.squad.filter(id=>id!==p.id);
-           if(tt.unhappy)tt.unhappy=tt.unhappy.filter(id=>id!==p.id);});
-         p.team=null;p.contract=newContractYears();delete p.demand;
-         if(!G.freeAgents.includes(p.id))G.freeAgents.push(p.id);
+         // Central movement API, not a hand-rolled strip. Doing it by hand here left the
+         // academy arrays untouched and never closed the career spell, so a player let
+         // go this way kept an open history entry reading "Season X to now" at a club he
+         // had already left. Same class of leak as the expulsion bug, different shape.
+         releasePlayerToPool(p);
+         p.contract=newContractYears();delete p.demand;
        }
      }
    });
@@ -2920,11 +2932,8 @@ function expiringWalkouts(){
  squadOf(t).slice().forEach(p=>{
    if(!p||p.runningDown==null)return;
    if(t.squad.length<=SQUAD_MIN){delete p.runningDown;p.contract=1;return;}
-   t.squad=t.squad.filter(id=>id!==p.id);
-   if(t.unhappy)t.unhappy=t.unhappy.filter(id=>id!==p.id);
-   if(G.xi)G.xi=G.xi.filter(id=>id!==p.id);
-   p.team=null;delete p.runningDown;delete p.demand;p.contract=newContractYears();
-   if(!G.freeAgents.includes(p.id))G.freeAgents.push(p.id);
+   releasePlayerToPool(p);
+   delete p.runningDown;delete p.demand;p.contract=newContractYears();
    logAdd(`${p.name} left on a free transfer \u2014 his contract expired.`);
  });
 }
@@ -3372,6 +3381,16 @@ function assertWorldIntegrity(where){
    if(p.team!=null&&held.get(p.id)!==p.team)
      throw new Error(p.name+" points at team "+p.team+" but is not held there"+tag);
    if(!isFinite(p.wage)||!isFinite(p.value))throw new Error(p.name+" has non-finite money"+tag);
+   // An open career spell must belong to the club actually holding him. Several release
+   // paths used to strip the squad by hand and never close the spell, leaving a free
+   // agent whose card still read "Season X to now" at a club he had already left.
+   const h=p.history&&p.history.length?p.history[p.history.length-1]:null;
+   if(h&&!h.out&&!p.retired){
+     if(p.team==null)throw new Error(p.name+" is unattached but his career spell is still open"+tag);
+     const club=T(p.team);
+     if(club&&h.club!==club.name)
+       throw new Error(p.name+" has an open spell at "+h.club+" but plays for "+club.name+tag);
+   }
  }
  const free=new Set();
  for(const id of G.freeAgents){
