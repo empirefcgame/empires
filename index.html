@@ -2204,8 +2204,15 @@ function canSwitchClub(){
  // only between seasons, once the campaign is fully settled
  return G.matchday===0&&!G.contLive&&!G.superLive;
 }
+/* A club does not hand its presidency to a man running something smaller than it.
+   Your current club's prestige is the ceiling on what will have you, so climbing to
+   a bigger job means building the one you have first, and a relegation costs you the
+   list of clubs you could walk into. */
+function switchCeiling(){const me=userTeamObj();return me?Math.round(me.prestige||0):0;}
+function clubWillHaveYou(t){return !!t&&t.id!==G.userTeam&&Math.round(t.prestige||0)<=switchCeiling();}
 function switchClub(newId){
  const t=T(newId);if(!t||newId===G.userTeam)return false;
+ if(!clubWillHaveYou(t))return false;   // out of your reach: the gate is not cosmetic
  const sp=currentSpell();
  if(sp){sp.to=G.season-1;}
  G.presidency.push({teamId:newId,name:t.name,from:G.season,to:null,
@@ -5021,11 +5028,11 @@ function rndShowVerdicts(){
    if(x.ok){
      box.appendChild($(`<div class="small" style="margin-bottom:3px"><b class="gold">\u2713 ${p.name} WORKED</b></div>
        <div class="small" style="margin-bottom:3px">${p.effect}</div>
-       <div class="small muted">This is permanent. It applies from now until the end of your time at the club.</div>`));
+       <div class="small muted">Permanent for as long as you run this club.</div>`));
    }else{
      box.appendChild($(`<div class="small" style="margin-bottom:3px"><b style="color:var(--loss)">\u2717 ${p.name} FAILED</b></div>
-       <div class="small" style="margin-bottom:3px">${money(x.cost)} written off. Nothing was learned, nothing was salvaged.</div>
-       <div class="small muted">It returns to the board eventually. The next attempt will cost 12% more.</div>`));
+       <div class="small" style="margin-bottom:3px">${money(x.cost)} written off.</div>
+       <div class="small muted">Returns to the board later, 12% dearer.</div>`));
    }
  });
  const led=rndLedger();
@@ -5061,7 +5068,7 @@ function rndDetails(key){
  box.appendChild($(`<div class="small" style="margin-bottom:3px"><b class="gold">If it works</b></div>
    <div class="small" style="margin-bottom:8px">${p.effect}</div>
    <div class="small" style="margin-bottom:3px"><b style="color:var(--loss)">If it fails</b></div>
-   <div class="small" style="margin-bottom:8px">The ${money(cost)} is gone. You get nothing back, no partial result, no consolation. The project returns to the board and the next attempt costs 12% more.</div>`));
+   <div class="small" style="margin-bottom:8px">${money(cost)} gone, nothing back. It returns to the board and costs 12% more next time.</div>`));
 
  box.appendChild($(`<div class="divider"></div>`));
  box.appendChild($(`<div class="small" style="margin-bottom:3px"><b>Is it worth it to you?</b></div>
@@ -5078,11 +5085,11 @@ function rndDetails(key){
    line("Expected total spend",money(expected),"gold")+
    (fails?line("Failed here before",`${fails}\u00D7 \u00B7 price up ${Math.round((Math.pow(1.12,Math.min(6,fails))-1)*100)}%`,"injtag"):"")
  ));
- box.appendChild($(`<div class="small muted" style="margin-top:8px">Expected total spend is what this project costs on average before it lands, counting the attempts that fail. It is the number to compare against a player, a stand, or a coach \u2014 not the price on the button.</div>`));
+ box.appendChild($(`<div class="small muted" style="margin-top:8px">Average cost before it lands, failed attempts included. This is the number to compare against a player or a stand.</div>`));
 
  if(done)box.appendChild($(`<div class="small gold" style="margin-top:10px">Already operating. Nothing more to pay.</div>`));
- else if(running)box.appendChild($(`<div class="small" style="margin-top:10px">Already in development. You will know when the season turns.</div>`));
- else if(!inWindow())box.appendChild($(`<div class="small muted" style="margin-top:10px">Projects are commissioned in the pre-season window only.</div>`));
+ else if(running)box.appendChild($(`<div class="small" style="margin-top:10px">In development. Result at season's end.</div>`));
+ else if(!inWindow())box.appendChild($(`<div class="small muted" style="margin-top:10px">Pre-season window only.</div>`));
  else{
    const b=$(`<button class="btn ${canPay?"":"sec"}" style="margin-top:12px">Commission \u00B7 ${money(cost)}</button>`);
    b.disabled=!canPay;
@@ -5722,8 +5729,7 @@ function render(){
  if(G.saveError){
    const sw=$(`<div class="card" style="border-color:var(--loss)">
      <div class="small"><b style="color:var(--loss)">Progress is not being saved.</b>
-     Your browser refused the last save \u2014 storage may be full or blocked.
-     Export a backup now, from the Office, before you lose the career.</div></div>`);
+     Your browser refused the last save. Export a backup from the Office now.</div></div>`);
    wrap.appendChild(sw);
  }
  ({club:viewClub,squad:viewSquad,league:viewLeague,cup:viewCup,transfers:viewTransfers,
@@ -5826,10 +5832,10 @@ function bettingCard(){
  if(!nx){mb.appendChild($(`<div class="small muted">No upcoming league match to bet on.</div>`));}
  else if(G.matchBet){
    const pot=Math.round(G.matchBet.stake*G.matchBet.mult);
-   mb.appendChild($(`<div class="small">Bet placed: <b class="gold">${G.matchBet.gf}\u2013${G.matchBet.ga}</b> for ${money(G.matchBet.stake)} \u00B7 pays <b class="gold">${money(pot)}</b> if exact. Settles when you play the match.</div>`));
+   mb.appendChild($(`<div class="small">Bet placed: <b class="gold">${G.matchBet.gf}\u2013${G.matchBet.ga}</b> for ${money(G.matchBet.stake)}, pays <b class="gold">${money(pot)}</b> if exact.</div>`));
  }else{
    const xg=matchXG(),oppName=T(nx.opp)?T(nx.opp).name:"?";
-   mb.appendChild($(`<div class="small muted" style="margin-bottom:6px">vs ${oppName} \u00B7 ${nx.home?"Home":"Away"} \u2014 call the exact final score. Long odds, small stakes, big thrill.</div>`));
+   mb.appendChild($(`<div class="small muted" style="margin-bottom:6px">vs ${oppName} \u00B7 ${nx.home?"Home":"Away"}. Call the exact score. Long odds.</div>`));
    const row=$(`<div class="row" style="gap:12px;align-items:center;justify-content:center;margin-bottom:6px"></div>`);
    const valGF=$(`<div style="font-weight:800;font-size:20px;min-width:22px;text-align:center">${_betGF}</div>`);
    const valGA=$(`<div style="font-weight:800;font-size:20px;min-width:22px;text-align:center">${_betGA}</div>`);
@@ -5873,7 +5879,7 @@ function bettingCard(){
  if(!inWindow()){
    fut.appendChild($(`<div class="small muted">Futures open during the transfer window.</div>`));
  }else{
-   fut.appendChild($(`<div class="small muted" style="margin-bottom:6px">Bet on how the season ends. Risk as much as you like \u2014 it settles at season\u2019s end.</div>`));
+   fut.appendChild($(`<div class="small muted" style="margin-bottom:6px">Bet on how the season ends. Settles at season's end.</div>`));
    const sr=$(`<div class="row" style="gap:6px;align-items:center;margin-bottom:8px"></div>`);
    sr.appendChild($(`<div class="small muted">Stake:</div>`));
    const fin=$(`<input type="text" inputmode="numeric" value="${_futStake.toLocaleString()}" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--line);background:transparent;color:inherit"/>`);
@@ -5907,7 +5913,7 @@ function bettingCard(){
  {const log=G.betLog||[];
   const hist=$(`<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"></div>`);
   if(!log.length){
-    hist.appendChild($(`<div class="small muted">No settled bets yet. Winnings and losses will show here.</div>`));
+    hist.appendChild($(`<div class="small muted">No settled bets yet.</div>`));
   }else{
     const net=log.reduce((a,e)=>a+(e.payout||0)-(e.stake||0),0);
     const wins=log.filter(e=>e.won).length;
@@ -5933,7 +5939,7 @@ function presidencyCard(){
  const card=$(`<details class="card" style="padding:10px"></details>`);
  const p=presidency(),pt=presidentTotals();
  card.appendChild($(`<summary style="cursor:pointer;font-weight:700;font-size:15px">\uD83E\uDD35 Your presidency \u00B7 <span class="gold">${pt.clubs}</span> club${pt.clubs===1?"":"s"}</summary>`));
- card.appendChild($(`<div class="small muted" style="margin:8px 0">${G.owner}\u2019s record across every club he has run. Trophies stay with the club; the record travels with you.</div>`));
+
  p.slice().reverse().forEach(sp=>{
    const span=sp.to==null?`S${sp.from}\u2013now`:`S${sp.from}\u2013S${sp.to}`;
    const won=[sp.league?`${sp.league} league`:"",sp.cup?`${sp.cup} cup`:"",
@@ -5943,34 +5949,50 @@ function presidencyCard(){
  if(pt.may1App)card.appendChild($(`<div class="small muted" style="margin-top:6px">May 1st Cup appearances: <b class="gold">${pt.may1App}</b></div>`));
  card.appendChild($(`<div class="divider"></div>`));
  if(!canSwitchClub()){
-   card.appendChild($(`<div class="small muted">You can only take a new job between seasons, once the current campaign is fully settled.</div>`));
+   card.appendChild($(`<div class="small muted">Between seasons only.</div>`));
    return card;
  }
+ const ceil=switchCeiling();
  card.appendChild($(`<div class="small" style="margin-bottom:6px"><b>Take charge elsewhere</b></div>`));
- card.appendChild($(`<div class="small muted" style="margin-bottom:8px">Leaving is permanent. You keep nothing but your name and your record: the squad, the money, the staff, your coach, your shortlist and every scouting report stay behind. Any club in the world will have you.</div>`));
+ card.appendChild($(`<div class="small muted" style="margin-bottom:8px">Leaving is permanent. Squad, money and staff stay behind.<br>
+   ${userTeamObj().name} is prestige <b class="gold">${ceil}</b>. Clubs above that will not have you.</div>`));
  const regSel=$(`<select style="width:100%;margin-bottom:6px"></select>`);
  REGIONS.forEach(r=>regSel.appendChild($(`<option value="${r.key}"${r.key===userRegionKey()?" selected":""}>${r.name}</option>`)));
  const clubSel=$(`<select style="width:100%;margin-bottom:8px"></select>`);
+ const note=$(`<div class="small muted" style="margin-bottom:8px"></div>`);
+ const btn=$(`<button class="btn sec">Resign and take the job</button>`);
+ let armed=false;
  const fill=()=>{
    clubSel.innerHTML="";
    const rk=regSel.value;
+   let open=0,blocked=0;
    [0,1,2].forEach(tier=>tierClubs(rk,tier).forEach(id=>{
      const t=T(id);if(!t||id===G.userTeam)return;
+     if(!clubWillHaveYou(t)){blocked++;return;}
+     open++;
      clubSel.appendChild($(`<option value="${id}">${t.name} \u00B7 ${tierName(rk,tier)} \u00B7 prestige ${Math.round(t.prestige||0)}</option>`));
    }));
+   const none=open===0;
+   clubSel.style.display=none?"none":"";
+   note.innerHTML=none
+     ? `No club in this region will have you. ${blocked} are out of reach.`
+     : (blocked?`${blocked} club${blocked===1?"":"s"} out of reach.`:"");
+   btn.disabled=none;
+   btn.style.opacity=none?.45:1;
+   if(armed){armed=false;btn.className="btn sec";btn.textContent="Resign and take the job";}
  };
- regSel.onchange=fill;fill();
- card.appendChild(regSel);card.appendChild(clubSel);
- const btn=$(`<button class="btn sec">Resign and take the job</button>`);
- let armed=false;
+ regSel.onchange=fill;
+ card.appendChild(regSel);card.appendChild(clubSel);card.appendChild(note);
  btn.onclick=()=>{
-   const id=+clubSel.value;const t=T(id);if(!t)return;
+   const id=+clubSel.value;const t=T(id);
+   if(!t||!clubWillHaveYou(t))return;
    if(!armed){armed=true;btn.className="btn";
      btn.textContent=`Confirm: leave ${userTeamObj().name} for ${t.name}`;
      setTimeout(()=>{if(armed){armed=false;btn.className="btn sec";btn.textContent="Resign and take the job";}},6000);
      return;}
    switchClub(id);render();
  };
+ fill();
  card.appendChild(btn);
  return card;
 }
@@ -5978,7 +6000,7 @@ function badgeCabinetCard(){
  const got=G.badges||{},n=Object.keys(got).length;
  const card=$(`<details class="card" style="padding:10px"></details>`);
  card.appendChild($(`<summary style="cursor:pointer;font-weight:700;font-size:15px">\uD83C\uDFC5 Badge cabinet \u00B7 <span class="gold">${n}</span> / ${BADGES.length}</summary>`));
- card.appendChild($(`<div class="small muted" style="margin:8px 0">Tap a badge to see how it\u2019s earned. Locked badges are dimmed.</div>`));
+ card.appendChild($(`<div class="small muted" style="margin:8px 0">Tap a badge to see how it's earned.</div>`));
  const grid=$(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px"></div>`);
  BADGES.forEach(b=>{
    const on=got[b.id]!=null;
@@ -6128,7 +6150,7 @@ function viewClub(w){
  if(inWindow()){
    w.appendChild($(`<div class="card center" style="border-color:var(--honey)">
      <b class="gold">Transfer Window \u00B7 Day ${G.window.day} of 3</b>
-     <div class="small muted" style="margin:4px 0 10px">Sign free agents, trade in the World tab, and review offers in the Market. When you are ready, move to the next day.</div></div>`));
+     <div class="small muted" style="margin:4px 0 10px">Sign free agents, trade in World, review offers in Market.</div></div>`));
    const bm=$(`<button class="btn sec" style="margin-bottom:8px">Go to the transfer market</button>`);
    bm.onclick=()=>{TAB="transfers";render()};w.appendChild(bm);
    const bd=$(`<button class="btn">${G.window.day>=3?"Close window and start the season":"Advance to Window Day "+(G.window.day+1)}</button>`);
@@ -6145,7 +6167,7 @@ function viewClub(w){
    const b=$(`<button class="btn cup">Play ${/^Group/.test(rn)?"":"the "}${rn}</button>`);
    b.onclick=()=>{playPendingCupRound();render()};
    w.appendChild(b);
-   w.appendChild($(`<div class="small muted center" style="margin-top:6px">Matchday ${G.matchday} is settled. Rotate the side or change your dials before the cup tie if you want to.</div>`));
+
  }else if(G.matchday<SEASON_LEN){
    const nx=upcomingFixture();
    w.appendChild($(`<div class="card row"><div class="lbl">Next fixture</div>
@@ -6156,7 +6178,7 @@ function viewClub(w){
    const b=$(`<button class="btn league">Play League Matchday ${G.matchday+1}</button>`);
    b.onclick=()=>{playMatchday();render()};
    w.appendChild(b);
-   if(cupNext)w.appendChild($(`<div class="small center" style="margin-top:6px;color:#ff9dc0">Your ${cupLabel(t.region)} tie follows, on its own.</div>`));
+
    w.appendChild($(`<div class="small muted center" style="margin-top:6px">
      <span style="color:#e0b93a">\u25A0</span> League \u00B7
      <span style="color:#d1447f">\u25A0</span> ${cupLabel(t.region)} \u00B7
@@ -6187,13 +6209,13 @@ function viewClub(w){
      if(inCup){
        w.appendChild($(`<div class="card center" style="border-color:var(--honey)">
          <b class="gold">Season complete \u2014 you are in the ${CONT_CUP}!</b>
-         <div class="small muted" style="margin-top:4px">Sixteen clubs, four knockout rounds, one tap at a time. The champion takes ${money(2500000)}. Adjust your squad and tactics between rounds if you dare.</div></div>`));
+         <div class="small muted" style="margin-top:4px">16 clubs, 4 knockout rounds. Winner takes ${money(2500000)}. You can change your side between rounds.</div></div>`));
        const b=$(`<button class="btn cont">Go to the ${CONT_CUP} draw</button>`);
        b.onclick=()=>{startContinentalCup();render()};
        w.appendChild(b);
      }else{
        w.appendChild($(`<div class="card center"><b class="gold">Season complete</b>
-         <div class="small muted" style="margin-top:4px">You did not qualify for the ${CONT_CUP} this season. It will be simulated, then promotion, relegation, ageing and new youth are processed and a new window opens.</div></div>`));
+         <div class="small muted" style="margin-top:4px">You did not qualify. It will be simulated, then the season turns over.</div></div>`));
        const b=$(`<button class="btn cont">Sim the ${CONT_CUP}</button>`);
        b.onclick=()=>{const RT2={};REGIONS.forEach(r=>RT2[r.key]=[0,1,2].map(tier=>standingsOf(r.key,tier)));
          runContinentalCup(RT2);G.contLive={alive:[G.lastCont&&G.lastCont.winnerId],round:4,log:G.lastCont?G.lastCont.log:[],
@@ -6260,9 +6282,9 @@ function viewClub(w){
      pc.appendChild($(`<div style="margin-top:8px">${sparkline(series)}</div>`));
      pc.appendChild($(`<div class="row small muted"><span>S${hist[0].season}</span><span>S${hist[hist.length-1].season}</span></div>`));
    }else{
-     pc.appendChild($(`<div class="small muted" style="margin-top:8px">The trend line appears once you have finished two seasons.</div>`));
+     pc.appendChild($(`<div class="small muted" style="margin-top:8px">Trend line appears after two seasons.</div>`));
    }
-   pc.appendChild($(`<div class="small muted" style="margin-top:8px">Prestige drives sponsorship, merchandise and attendance. You earn it from league finishes, cup runs and ${CONT_CUP} titles, and lose 6% of it every season, so it has to be defended.</div>`));
+   pc.appendChild($(`<div class="small muted" style="margin-top:8px">Drives sponsorship, merchandise and attendance. Earned from league finishes, cup runs and ${CONT_CUP} titles. Drops 6% every season.</div>`));
    w.appendChild(pc);
  }
 
@@ -6290,7 +6312,7 @@ function superPhase(w,advance){
    if(inCup){
      w.appendChild($(`<div class="card center" style="border-color:var(--honey)">
        <b class="gold">You won your regional cup \u2014 you are in the ${SUPER_CUP}!</b>
-       <div class="small muted" style="margin-top:4px">The four regional cup winners, two rounds, one tap at a time. The champion takes ${money(IN(SUPER_TITLE_BONUS))}.</div></div>`));
+       <div class="small muted" style="margin-top:4px">The four regional cup winners. Two rounds. Winner takes ${money(IN(SUPER_TITLE_BONUS))}.</div></div>`));
      const b=$(`<button class="btn cont">Go to the ${SUPER_CUP} draw</button>`);
      b.onclick=()=>{startSuperCup();render()};
      w.appendChild(b);
@@ -6388,8 +6410,8 @@ function viewSquad(w){
    inp.oninput=()=>{G.tactics[k]=+inp.value};
    sr.appendChild(inp);fc.appendChild(sr);
  });
- if(lockDials)fc.appendChild($(`<div class="small muted" style="margin-top:8px">The dials your coach has set for the next match. Switch him off above to tune them yourself.</div>`));
- else if(delegated)fc.appendChild($(`<div class="small muted" style="margin-top:8px">Your coach picks the XI${lockForm?" and shape":""}; the dials are yours to set at his level.</div>`));
+ if(lockDials)fc.appendChild($(`<div class="small muted" style="margin-top:8px">Set by your coach. Switch him off above to set them yourself.</div>`));
+ else if(delegated)fc.appendChild($(`<div class="small muted" style="margin-top:8px">Your coach picks the XI${lockForm?" and shape":""}. The dials are yours.</div>`));
  w.appendChild(fc);
 
  const xc=$(`<div class="card"></div>`);
@@ -6408,7 +6430,7 @@ function viewSquad(w){
      coachAutoSetup();
    };
    if(ctier>0){const _c=G.coach,_tr=COACH_TRAITS[_c.trait];
-     xc.appendChild($(`<div class="small muted" style="margin-bottom:6px">${_c.name} \u00B7 ${coachInfo().label} \u00B7 <span class="gold">${_tr.label}</span>. Tap above for a one-off pick, or delegate every matchday with the toggle.</div>`));}
+     xc.appendChild($(`<div class="small muted" style="margin-bottom:6px">${_c.name} \u00B7 ${coachInfo().label} \u00B7 <span class="gold">${_tr.label}</span>. Tap above for a one-off pick, or use the toggle to hand him every matchday.</div>`));}
  }
  const slots=slotList(G.formation);
  const used=new Set(G.xi);
@@ -6430,7 +6452,7 @@ function viewSquad(w){
   if(un.length){
     const uc=$(`<div class="card" style="border:1px solid var(--loss)"></div>`);
     uc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px;color:var(--loss)">\u26A0\uFE0F Asking to leave (${un.length})</h3>`));
-    uc.appendChild($(`<div class="small muted" style="margin-bottom:8px">These players have handed in transfer requests over their lack of minutes. Sell now at a cut price, or promise them a run in the side \u2014 but if they still don\u2019t play next season, they leave for nothing.</div>`));
+    uc.appendChild($(`<div class="small muted" style="margin-bottom:8px">Transfer requests over lack of minutes. Sell cheap now, or promise them games. Break the promise and they leave for nothing.</div>`));
     un.forEach(p=>{
       const why=p.age<DISCONTENT_YOUNG_AGE?`only ${p.as||0} apps at ${p.age} \u2014 his development is stalling`
         :`a ${p.ovr} OVR player with ${p.as||0} apps \u2014 he expects to start`;
@@ -6450,7 +6472,7 @@ function viewSquad(w){
   if(owed.length){
     const pc=$(`<div class="card"></div>`);
     pc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\uD83E\uDD1D Promised minutes (${owed.length})</h3>`));
-    pc.appendChild($(`<div class="small muted" style="margin-bottom:6px">You told these players they would play. Give them at least ${DISCONTENT_YOUNG_APPS} appearances this season or they leave for nothing.</div>`));
+    pc.appendChild($(`<div class="small muted" style="margin-bottom:6px">Give them ${DISCONTENT_YOUNG_APPS}+ appearances this season or they leave for nothing.</div>`));
     owed.forEach(p=>{
       const ok=(p.as||0)>=DISCONTENT_YOUNG_APPS;
       pc.appendChild($(`<div class="small" style="margin-bottom:3px"><span class="pname" data-p="${p.id}">${p.name}</span> \u00B7 <b class="${ok?'res-w':'res-l'}">${p.as||0}</b>/${DISCONTENT_YOUNG_APPS} apps ${ok?"\u2014 promise kept":"\u2014 still owed minutes"}</div>`));
@@ -6466,7 +6488,7 @@ function viewSquad(w){
     const qualifies=mine||((ut.prestige||0)>=SAGA_PRESTIGE&&ut.tier===0);
     const sc=$(`<div class="card" style="border:1px solid var(--honey)"></div>`);
     sc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\u2605 ${nameLink(sp)} \u2014 final year</h3>
-      <div class="small muted" style="margin-bottom:8px">${famePill(sp)}${from?from.name:"?"} \u00B7 ${sp.pos} ${sp.ovr} \u00B7 ${sp.age}y \u00B7 his deal expires at the end of this season. There is no fee: whoever wins him pays a wage, not a transfer.</div>`));
+      <div class="small muted" style="margin-bottom:8px">${famePill(sp)}${from?from.name:"?"} \u00B7 ${sp.pos} ${sp.ovr} \u00B7 ${sp.age}y. Out of contract at season's end, so there is no fee. Whoever wins him just pays the wage.</div>`));
     if(sg.leaks.length){
       sc.appendChild($(`<div class="small" style="margin-bottom:6px"><b>What the press is saying</b></div>`));
       sg.leaks.forEach(l=>sc.appendChild($(`<div class="small muted" style="margin-bottom:3px">\u00B7 ${l.text.replace(sp.name,nameLink(sp))}</div>`)));
@@ -6474,7 +6496,7 @@ function viewSquad(w){
     const rivals=sg.suitors.filter(id=>id!==G.userTeam).map(id=>T(id)).filter(Boolean);
     if(rivals.length)sc.appendChild($(`<div class="small" style="margin-top:6px"><b>In the running:</b> <span class="muted">${rivals.map(t=>t.name).join(", ")}</span></div>`));
     if(mine)sc.appendChild($(`<div class="small gold" style="margin-top:6px">He is yours, so you speak to him first. Put your offer in before the season ends.</div>`));
-    else if(!qualifies)sc.appendChild($(`<div class="small muted" style="margin-top:6px">You are not in the running. A club needs prestige ${SAGA_PRESTIGE}+ and top-flight football to get a hearing \u2014 you are at ${Math.round(ut.prestige||0)}.</div>`));
+    else if(!qualifies)sc.appendChild($(`<div class="small muted" style="margin-top:6px">You need prestige ${SAGA_PRESTIGE}+ and top-flight football to bid. You are at ${Math.round(ut.prestige||0)}.</div>`));
     if(qualifies){
       const base=wageOf(sp);
       const tiers=[["Match the market",1.35],["Go strong",2.1],["Break the wage structure",3.2]];
@@ -6499,7 +6521,7 @@ function viewSquad(w){
   if(due.length||walking.length){
     const cc=$(`<div class="card" style="border:1px solid var(--honey)"></div>`);
     cc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\uD83D\uDCDD Contract talks (${due.length})</h3>`));
-    if(due.length)cc.appendChild($(`<div class="small muted" style="margin-bottom:8px">These deals are up. Winning makes your own players expensive \u2014 their demands rise with form, honours and rival interest. Refuse and they run down the deal and leave for nothing.</div>`));
+    if(due.length)cc.appendChild($(`<div class="small muted" style="margin-bottom:8px">Deals up at season's end. Demands rise with form, honours and rival interest. Refuse and they leave for nothing.</div>`));
     due.forEach(p=>{
       const rise=Math.round((p.demand/Math.max(1,p.wage)-1)*100);
       const box=$(`<div style="padding:8px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px"></div>`);
@@ -6529,15 +6551,15 @@ function viewSquad(w){
    <th class="l">Player</th><th></th><th>Age</th><th>OVR</th><th>POT</th><th>Wage</th><th>Deal</th><th>Fit</th><th></th></tr></thead><tbody>${rows}</tbody></table>`);
  sqt.querySelectorAll("[data-rel]").forEach(b=>b.onclick=e=>{e.stopPropagation();releasePlayer(P(+b.dataset.rel))});
  wireNames(sqt);{const _w=$(`<div class="tscroll"></div>`);_w.appendChild(sqt);sc.appendChild(_w);}
- sc.appendChild($(`<div class="small muted" style="margin-top:6px">Tap a name for full attributes and career stats. Release frees the wage and squad slot at any time, but returns no fee.</div>`));
- sc.appendChild($(`<div class="small muted" style="margin-top:8px"><span class="ret">R</span> = final season. Players retire at the end of their age-40 year and are replaced in the world by a new 16-year-old.</div>`));
+ sc.appendChild($(`<div class="small muted" style="margin-top:6px">Tap a name for full stats. Release clears the wage and the squad slot, but you get no fee.</div>`));
+ sc.appendChild($(`<div class="small muted" style="margin-top:8px"><span class="ret">R</span> = final season. Players retire after their age-40 year.</div>`));
  w.appendChild(sc);
 
  // ---- Academy ----
  {const t=userTeamObj();
   const ac=$(`<div class="card"></div>`);
   ac.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\uD83C\uDF31 Academy (${(t.academy||[]).length}/${ACADEMY_MAX})</h3>`));
-  ac.appendChild($(`<div class="small muted" style="margin-bottom:8px">Your under-${ACADEMY_AGE} prospects. They develop here, but at ${ACADEMY_AGE} they must be promoted into the senior squad (${t.squad.length}/${SQUAD_MAX}) or they leave the club. Promote early to give them minutes.</div>`));
+  ac.appendChild($(`<div class="small muted" style="margin-bottom:8px">Under-${ACADEMY_AGE} prospects. At ${ACADEMY_AGE} they must go up to the senior squad (${t.squad.length}/${SQUAD_MAX}) or leave. Promote early for game time.</div>`));
   const kids=academyOf(t).sort((a,b)=>(b.pot-a.pot)||(b.ovr-a.ovr));
   if(!kids.length){
     ac.appendChild($(`<div class="small muted">The academy is empty. New intake arrives each season.</div>`));
@@ -6585,7 +6607,7 @@ function viewLeague(w){
  if(sc.length){
    const bc=$(`<div class="card" style="margin-top:12px"></div>`);
    bc.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Golden Boot race</h3>
-     <div class="small muted" style="margin-bottom:6px">All ${regionOf(userRegionKey()).name} divisions, all competitions. The region's top scorer takes the Boot at season's end.</div>`));
+     <div class="small muted" style="margin-bottom:6px">All ${regionOf(userRegionKey()).name} divisions and competitions. Top scorer takes the Boot.</div>`));
    const rows=sc.map((p,i)=>`<tr class="${p.team===G.userTeam?'me':''}"><td class="l muted">${i+1}</td>`+
      `<td class="l">${famePill(p)}<span class="pname" data-p="${p.id}">${p.name}</span>`+
      `${(p.gbWins||0)>0?` <span class="gold small">\u26BD\u00D7${p.gbWins}</span>`:""}</td>`+
@@ -6599,7 +6621,7 @@ function viewLeague(w){
  // calendar: league + cup interleaved
  const fc=$(`<div class="card" style="margin-top:12px"></div>`);
  fc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">Calendar</h3>
-   <div class="small muted" style="margin-bottom:8px">League fixtures with <span class="cupmark">CUP</span> rounds in between. Results fill in as you play.</div>`));
+   <div class="small muted" style="margin-bottom:8px">League fixtures, with <span class="cupmark">CUP</span> rounds in between.</div>`));
  const tt=tierClubs(userRegionKey(),tier),li=tt.indexOf(G.userTeam);
  let html="";
  G.fixtures.forEach((rd,md)=>{
@@ -6670,7 +6692,7 @@ function viewTransfers(w){
  // window controls
  if(open){
    const wc=$(`<div class="card" style="border-color:var(--honey)"></div>`);
-   wc.appendChild($(`<div class="small">Pre-season window \u00B7 <b>Day ${G.window.day} of 3</b> \u00B7 ${G.window.offersMade} approach${G.window.offersMade===1?'':'es'} made. Trade as much as you like. Club-to-club trades and sales happen only now. Free agents can be signed anytime.</div>`));
+   wc.appendChild($(`<div class="small">Pre-season window \u00B7 <b>Day ${G.window.day} of 3</b></div>`));
    const bd=$(`<button class="btn" style="margin-top:8px">${G.window.day>=3?"Close window and start season":"Advance to Day "+(G.window.day+1)}</button>`);
    bd.onclick=()=>advanceWindowDay();wc.appendChild(bd);
    w.appendChild(wc);
@@ -6695,9 +6717,9 @@ function viewTransfers(w){
        rej.onclick=()=>rejectOffer(o);
        r.appendChild(acc);r.appendChild(rej);oc.appendChild(r);
      });
-     if(thin)oc.appendChild($(`<div class="small muted" style="margin-top:6px">Squad too thin to sell \u2014 you are at the ${SQUAD_MIN}-player floor. Sign someone before you can accept a bid.</div>`));
+     if(thin)oc.appendChild($(`<div class="small muted" style="margin-top:6px">You are at the ${SQUAD_MIN}-player floor. Sign someone before you can sell.</div>`));
      else if(G.offers.some(o=>{const p=P(o.pid);return p&&p.pos==="GK";})&&squadOf(userTeamObj()).filter(x=>x&&x.pos==="GK").length<=2)
-       oc.appendChild($(`<div class="small muted" style="margin-top:6px">Keeper bids are locked \u2014 you must keep at least 2 goalkeepers.</div>`));
+       oc.appendChild($(`<div class="small muted" style="margin-top:6px">Keeper bids locked. You must keep 2 goalkeepers.</div>`));
      wireNames(oc);w.appendChild(oc);
    }
  }else{
@@ -6708,7 +6730,7 @@ function viewTransfers(w){
  if(G.superScout&&G.superShort&&G.superShort.length&&inWindow()){
    const shc=$(`<div class="card" style="border-color:var(--honey)"></div>`);
    shc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\u2605 Chief Scout shortlist</h3>
-     <div class="small muted" style="margin-bottom:6px">Best young talent across all regions. Their clubs are already revealed \u2014 buy them from the World tab during the window.</div>`));
+     <div class="small muted" style="margin-bottom:6px">Best young talent across every region. Buy them from the World tab during the window.</div>`));
    const _bud=userTeamObj().budget;
    const rows=G.superShort.map(pid=>{const p=P(pid);if(!p||p.team===null)return"";
      const club=T(p.team);
@@ -6744,7 +6766,7 @@ function viewTransfers(w){
  sTab.onclick=()=>{MKT_TAB='scouted';render()};
  tabRow.appendChild(fTab);tabRow.appendChild(sTab);mc.appendChild(tabRow);
  if(MKT_TAB==='scouted'&&!scoutedTeamIds.length){
-   mc.appendChild($(`<div class="small muted" style="padding:8px 0">No teams scouted yet this season. Go to the World tab, tap a club, and scout them. Their players will appear here.</div>`));
+   mc.appendChild($(`<div class="small muted" style="padding:8px 0">Nothing scouted yet. Scout a club from the World tab and its players show up here.</div>`));
    w.appendChild(mc);return;
  }
  const poolLabel=MKT_TAB==='free'?'Free agents':'Scouted players';
@@ -6848,13 +6870,13 @@ function viewOffice(w){
        <span class="${f.net>=0?'amt-p':'amt-n'}">${f.net>=0?'+':''}${money(f.net)}</span></div></div>`));
  }else fc.appendChild($(`<div class="small muted">Play a matchday to see the weekly ledger.</div>`));
  {const idx=inflIndex();
-  fc.appendChild($(`<div class="small muted" style="margin-top:6px">Prices and wages across the game have risen <b class="gold">${Math.round((idx-1)*100)}%</b> since season 1 \u00B7 <b>${inflPct()}%</b> this season. Contracts you have already signed do not move: a deal agreed years ago quietly becomes a bargain.</div>`));}
+  fc.appendChild($(`<div class="small muted" style="margin-top:6px">Prices and wages are up <b class="gold">${Math.round((idx-1)*100)}%</b> since season 1, <b>${inflPct()}%</b> this season. Contracts already signed do not change.</div>`));}
  if(G.ticketManager){
    const nx=nextHomeFixture();
    if(nx)G.ticketPrice=optimalTicketPrice(t,nx.opp,nx.cupStage);
    const mgr=$(`<div style="margin-top:8px;padding:10px;border:1px solid var(--honey);border-radius:8px"></div>`);
    mgr.appendChild($(`<div class="small"><b class="gold">${G.ticketManager.name}</b> is managing ticket prices \u00B7 ${money(ticketMgrWage())}/wk</div>`));
-   mgr.appendChild($(`<div class="small muted" style="margin-top:3px">He sets the revenue-maximising price for every home fixture automatically.${nx?` Next home fixture priced at <b class="gold">\u00A3${G.ticketPrice}</b> \u00B7 est. attendance ${attendance(t,nx.opp,nx.cupStage).toLocaleString()}/${effCapacity(t).toLocaleString()}.`:""}</div>`));
+   mgr.appendChild($(`<div class="small muted" style="margin-top:3px">He sets the best price for every home fixture automatically.${nx?` Next home fixture priced at <b class="gold">\u00A3${G.ticketPrice}</b> \u00B7 est. attendance ${attendance(t,nx.opp,nx.cupStage).toLocaleString()}/${effCapacity(t).toLocaleString()}.`:""}</div>`));
    const dis=$(`<button class="btn sm sec" style="margin-top:8px">Dismiss ${G.ticketManager.name}</button>`);
    dis.onclick=()=>{G.ticketManager=null;logAdd("Released the ticket manager \u2014 you set prices again.");saveGame(true);render();};
    mgr.appendChild(dis);
@@ -6869,7 +6891,7 @@ function viewOffice(w){
    fc.querySelector(".slider-row").appendChild(tp);
    fc.appendChild(tpl);
    const hireBox=$(`<div style="margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:8px"></div>`);
-   hireBox.appendChild($(`<div class="small muted">Hire a ticket manager (${money(ticketMgrWage())}/wk) to set the revenue-maximising price for every home fixture automatically \u2014 no more setting it by hand.</div>`));
+   hireBox.appendChild($(`<div class="small muted">Sets the best price for every home fixture automatically. ${money(ticketMgrWage())}/wk.</div>`));
    const hire=$(`<button class="btn sm" style="margin-top:8px">Hire ticket manager \u00B7 ${money(ticketMgrWage())}/wk</button>`);
    hire.onclick=()=>{G.ticketManager={name:staffName()};
      logAdd(`Hired ${G.ticketManager.name} to manage ticket pricing.`);saveGame(true);render();};
@@ -6905,7 +6927,7 @@ function viewOffice(w){
        mkt.surge<=-10?`You are priced above what fills the ground. Around \u00A3${mkt.resale} would pack more in.`:
        "Your price is about right for what this fixture will bear."}</div>`));
    }else{
-     bo.appendChild($(`<div class="small muted">No home fixture scheduled. The box office reopens next season.</div>`));
+     bo.appendChild($(`<div class="small muted">No home fixture left. Box office reopens next season.</div>`));
    }
    w.appendChild(bo);
  }
@@ -6915,14 +6937,14 @@ function viewOffice(w){
  stad.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">Stadium</h3>`));
  stad.appendChild($(`<div class="small muted" style="margin-bottom:8px">Capacity ${t.capacity.toLocaleString()}${t.building>0?` \u00B7 <span style="color:var(--loss)">temporary ground (${effCapacity(t).toLocaleString()})</span>`:""} \u00B7 Level ${t.stadiumLevel}/${STADIUM_TIERS.length}</div>`));
  if(t.building>0){
-   stad.appendChild($(`<div class="small">Construction under way \u2014 ${t.building} season${t.building===1?"":"s"} of temporary ground left, then ${(t.pendingSeats||0).toLocaleString()} seats are added. Gate income is reduced while you play in the temporary ground.</div>`));
+   stad.appendChild($(`<div class="small">${t.building} season${t.building===1?"":"s"} left in the temporary ground, then ${(t.pendingSeats||0).toLocaleString()} seats are added. Gate income is down until then.</div>`));
  }else if(t.stadiumLevel>=STADIUM_TIERS.length){
    stad.appendChild($(`<div class="small gold">Maximum stadium size reached.</div>`));
  }else{
    const plan=stadiumPlan(t.stadiumLevel);
    const dur=(plan.years||1)===1?"one season":`${plan.years} seasons`;
    const size=plan.target?`up to ${plan.target.toLocaleString()} capacity`:`+${plan.addSeats.toLocaleString()} seats`;
-   stad.appendChild($(`<div class="small" style="margin-bottom:8px">Next: <b>${plan.label}</b> for ${money(plan.cost)} (${size}). You play in a reduced-capacity temporary ground for ${dur}, then reopen bigger.</div>`));
+   stad.appendChild($(`<div class="small" style="margin-bottom:8px">Next: <b>${plan.label}</b> for ${money(plan.cost)} (${size}). Temporary ground for ${dur}, then you reopen bigger.</div>`));
    const bb=$(`<button class="btn ${t.budget>=plan.cost?'':'sec'}">Begin ${plan.label} \u00B7 ${money(plan.cost)}</button>`);
    bb.disabled=t.budget<plan.cost;
    bb.onclick=()=>startStadiumBuild();
@@ -6937,7 +6959,7 @@ function viewOffice(w){
   const lab=$(`<div class="card"></div>`);
   const landed=Object.keys(r.done).length;
   lab.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\uD83E\uDDEA Innovation Lab</h3>`));
-  lab.appendChild($(`<div class="small muted" style="margin-bottom:8px">Long odds on permanent advantages. A project that lands changes a rule of your club forever; one that fails takes the money and gives you nothing back. Tap <b>Details</b> on anything here for the full case before you spend. ${landed?`<b class="gold">${landed} landed</b>`:"Nothing has landed yet."}</div>`));
+  if(landed)lab.appendChild($(`<div class="small muted" style="margin-bottom:8px"><b class="gold">${landed}</b> landed</div>`));
 
   if(r.active.length){
     lab.appendChild($(`<div class="small" style="margin-bottom:4px"><b>In development</b></div>`));
@@ -6982,12 +7004,12 @@ function viewOffice(w){
       body.appendChild(row);
     });
     if(led.costKnown<led.attempts)
-      body.appendChild($(`<div class="small muted" style="margin-top:6px">Projects from before your club started keeping a research ledger are listed without a price.</div>`));
+      body.appendChild($(`<div class="small muted" style="margin-top:6px">Older projects predate the ledger, so no price is recorded.</div>`));
     lab.appendChild(head);lab.appendChild(body);
   }
 
   if(!inWindow()){
-    lab.appendChild($(`<div class="small muted" style="margin-top:8px">New projects can only be commissioned during the pre-season window.</div>`));
+    lab.appendChild($(`<div class="small muted" style="margin-top:8px">Pre-season window only.</div>`));
   }else if(!r.offers.length){
     lab.appendChild($(`<div class="small muted" style="margin-top:8px">Nothing new on the desk this season.</div>`));
   }else{
@@ -7019,10 +7041,10 @@ function viewOffice(w){
   const sup=$(`<div class="card"></div>`);
   sup.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Supporters\u2019 club</h3>`));
   if(t.supporters){
-    sup.appendChild($(`<div class="small" style="margin-bottom:8px">A supporters\u2019 club coordinator is on staff \u00B7 ${money(supporterCost())}/yr. Your crowd gives a modest boost in <b>home</b> matches.</div>`));
+    sup.appendChild($(`<div class="small" style="margin-bottom:8px">Supporters' club coordinator on staff \u00B7 ${money(supporterCost())}/yr. Small boost in <b>home</b> matches.</div>`));
     const b=$(`<button class="btn sm sec">Release coordinator</button>`);b.onclick=dismissSupporters;sup.appendChild(b);
   }else{
-    sup.appendChild($(`<div class="small muted" style="margin-bottom:8px">Hire a supporters\u2019 club coordinator (${money(supporterCost())}/yr) for a modest home-match boost \u2014 a louder, fuller ground.</div>`));
+    sup.appendChild($(`<div class="small muted" style="margin-bottom:8px">Small boost in home matches. ${money(supporterCost())}/yr.</div>`));
     const b=$(`<button class="btn sm">Hire coordinator \u00B7 ${money(supporterCost())}/yr</button>`);b.onclick=hireSupporters;sup.appendChild(b);
   }
   w.appendChild(sup);}
@@ -7032,11 +7054,11 @@ function viewOffice(w){
   const fac=$(`<div class="card"></div>`);
   fac.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Training facility</h3>`));
   const lvl=t.facility||0;
-  fac.appendChild($(`<div class="small muted" style="margin-bottom:8px">Speeds up development of your under-23 players \u2014 higher tiers, faster growth (capped by each prospect\u2019s potential). Current: <b class="gold">${lvl?FACILITY_TIERS[lvl].short:"None"}</b>${lvl?` \u00B7 upkeep ${money(facilityMaintCost(lvl))}/yr`:""}.</div>`));
+  fac.appendChild($(`<div class="small muted" style="margin-bottom:8px">Faster development for under-23s, up to each prospect's potential. Current: <b class="gold">${lvl?FACILITY_TIERS[lvl].short:"None"}</b>${lvl?` \u00B7 upkeep ${money(facilityMaintCost(lvl))}/yr`:""}.</div>`));
   if(lvl>0&&t.facilityMaint==="pending"&&inWindow()){
     const m=facilityMaintCost(lvl);
     const box=$(`<div style="margin-bottom:8px;padding:8px;border:1px solid var(--loss);border-radius:8px"></div>`);
-    box.appendChild($(`<div class="small" style="color:var(--loss)"><b>Facility upkeep due: ${money(m)}.</b> Pay it to keep the development boost this season, or decline and forgo it.</div>`));
+    box.appendChild($(`<div class="small" style="color:var(--loss)"><b>Facility upkeep due: ${money(m)}.</b> Pay to keep the boost this season.</div>`));
     const row=$(`<div class="row" style="gap:6px;margin-top:8px"></div>`);
     const pay=$(`<button class="btn sm" style="flex:1">Pay ${money(m)}</button>`);pay.onclick=payFacilityMaint;
     const dec=$(`<button class="btn sm sec" style="flex:1">Decline</button>`);dec.onclick=declineFacilityMaint;
@@ -7047,11 +7069,11 @@ function viewOffice(w){
   }
   if(lvl<3){
     const nx=lvl+1,cost=facilityCost(nx),boughtThis=(t.facilityBoughtSeason||0)===G.season;
-    fac.appendChild($(`<div class="small" style="margin-bottom:8px">Next: <b>${FACILITY_TIERS[nx].label}</b> for ${money(cost)} (then ${money(facilityMaintCost(nx))}/yr upkeep). Facilities are bought Bronze \u2192 Silver \u2192 Gold, one per season.</div>`));
+    fac.appendChild($(`<div class="small" style="margin-bottom:8px">Next: <b>${FACILITY_TIERS[nx].label}</b> for ${money(cost)}, then ${money(facilityMaintCost(nx))}/yr. Bronze \u2192 Silver \u2192 Gold, one per season.</div>`));
     const bb=$(`<button class="btn sm ${t.budget>=cost&&!boughtThis?'':'sec'}">Build ${FACILITY_TIERS[nx].short} \u00B7 ${money(cost)}</button>`);
     bb.disabled=t.budget<cost||boughtThis;
     bb.onclick=buyFacility;fac.appendChild(bb);
-    if(boughtThis)fac.appendChild($(`<div class="small muted" style="margin-top:6px">Already invested in a facility this season \u2014 upgrade again next season.</div>`));
+    if(boughtThis)fac.appendChild($(`<div class="small muted" style="margin-top:6px">One facility per season. Upgrade again next season.</div>`));
   }else fac.appendChild($(`<div class="small gold">Gold facility \u2014 fastest development, fully upgraded.</div>`));
   w.appendChild(fac);}
 
@@ -7060,10 +7082,10 @@ function viewOffice(w){
   const jet=$(`<div class="card"></div>`);
   jet.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Team jet</h3>`));
   if(t.jet){
-    jet.appendChild($(`<div class="small" style="margin-bottom:8px">A team jet keeps the squad fresh on the road \u2014 a modest boost in <b>away</b> matches \u00B7 upkeep ${money(jetMaintCost())}/yr.</div>`));
+    jet.appendChild($(`<div class="small" style="margin-bottom:8px">Team jet on the books \u00B7 ${money(jetMaintCost())}/yr. Small boost in <b>away</b> matches.</div>`));
     if(t.jetMaint==="pending"&&inWindow()){
       const box=$(`<div style="margin-bottom:8px;padding:8px;border:1px solid var(--loss);border-radius:8px"></div>`);
-      box.appendChild($(`<div class="small" style="color:var(--loss)"><b>Jet upkeep due: ${money(jetMaintCost())}.</b> Pay it to keep the away boost this season, or decline and forgo it.</div>`));
+      box.appendChild($(`<div class="small" style="color:var(--loss)"><b>Jet upkeep due: ${money(jetMaintCost())}.</b> Pay to keep the boost this season.</div>`));
       const row=$(`<div class="row" style="gap:6px;margin-top:8px"></div>`);
       const pay=$(`<button class="btn sm" style="flex:1">Pay ${money(jetMaintCost())}</button>`);pay.onclick=payJetMaint;
       const dec=$(`<button class="btn sm sec" style="flex:1">Decline</button>`);dec.onclick=declineJetMaint;
@@ -7073,7 +7095,7 @@ function viewOffice(w){
       jet.appendChild($(`<div class="small" style="color:${paid?'var(--win)':'var(--loss)'}">${paid?"Upkeep paid \u2014 away boost active this season.":"Upkeep unpaid \u2014 no away boost this season."}</div>`));
     }
   }else{
-    jet.appendChild($(`<div class="small muted" style="margin-bottom:8px">Buy a team jet (${money(jetCost())}, then ${money(jetMaintCost())}/yr upkeep) for a modest boost in away matches \u2014 less travel fatigue.</div>`));
+    jet.appendChild($(`<div class="small muted" style="margin-bottom:8px">Small boost in away matches. ${money(jetCost())}, then ${money(jetMaintCost())}/yr.</div>`));
     const bb=$(`<button class="btn sm ${t.budget>=jetCost()?'':'sec'}">Buy team jet \u00B7 ${money(jetCost())}</button>`);
     bb.disabled=t.budget<jetCost();bb.onclick=buyJet;jet.appendChild(bb);
   }
@@ -7084,7 +7106,10 @@ function viewOffice(w){
   const sp=$(`<div class="card"></div>`);
   sp.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">\uD83D\uDC5F Shoe sponsorship</h3>`));
   if(!G.liaison){
-    sp.appendChild($(`<div class="small muted" style="margin-bottom:8px">Hire a shoe brand liaison (${money(liaisonWage())}/wk) to chase a sponsorship. They spend a season being evaluated by the brands, then bring a pitch. Deals run ${SHOE_DEAL_LEN} seasons: a signing bonus plus a yearly fee, with cumulative on-field targets to keep the brand happy (hit 3 of 4). Tiers: Gold ${money(shoeValueOf("gold"))}/yr, Silver ${money(shoeValueOf("silver"))}/yr, Bronze ${money(shoeValueOf("bronze"))}/yr.</div>`));
+    sp.appendChild($(`<div class="small muted" style="margin-bottom:8px">Chases a boot sponsorship. ${money(liaisonWage())}/wk.<br>
+    Takes a season, then brings you a pitch.<br>
+    Deals run ${SHOE_DEAL_LEN} seasons: signing bonus plus a yearly fee. Hit 3 of 4 targets to renew.<br>
+    Gold ${money(shoeValueOf("gold"))}/yr \u00B7 Silver ${money(shoeValueOf("silver"))}/yr \u00B7 Bronze ${money(shoeValueOf("bronze"))}/yr.</div>`));
     const b=$(`<button class="btn sm">Hire liaison \u00B7 ${money(liaisonWage())}/wk</button>`);b.onclick=hireLiaison;sp.appendChild(b);
   }else if(t.sponsor){
     const d=t.sponsor,bi=brandInfo(d.brand),tier=SHOE_TIERS[d.tier];
@@ -7106,7 +7131,7 @@ function viewOffice(w){
       const dec=$(`<button class="btn sm sec">End the partnership</button>`);dec.onclick=declineShoeOffers;sp.appendChild(dec);
     }else{
       sp.appendChild($(`<div class="small" style="margin-bottom:4px">Sponsored by <b class="gold">${bi.name}</b> (${tier.name} tier) \u00B7 Year ${year} of ${SHOE_DEAL_LEN}</div>`));
-      sp.appendChild($(`<div class="small muted" style="margin-bottom:6px">Pays ${money(IN(tier.value))}/yr for the full term \u2014 funding is secure regardless of pace.</div>`));
+      sp.appendChild($(`<div class="small muted" style="margin-bottom:6px">Pays ${money(IN(tier.value))}/yr for the full term.</div>`));
       const grid=$(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px"></div>`);
       SHOE_KEYS.forEach(k=>{const need=tier.targets[k],have=pr[k],ok=have>=need;
         grid.appendChild($(`<div class="small" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px">${ok?'<span class="gold">\u2714</span> ':''}${labels[k]}<br><b class="${ok?'gold':''}">${have}</b> / ${need}</div>`));});
@@ -7115,7 +7140,7 @@ function viewOffice(w){
       const fb=$(`<button class="btn sm sec" style="margin-top:8px">Release liaison</button>`);fb.onclick=fireLiaison;sp.appendChild(fb);
     }
   }else if(G.liaisonCycle&&G.liaisonCycle.phase==="offered"){
-    sp.appendChild($(`<div class="small" style="margin-bottom:8px">The liaison has brought <b class="gold">${G.liaisonCycle.offers.length} pitch${G.liaisonCycle.offers.length>1?"es":""}</b>. Pick one (or decline and keep looking):</div>`));
+    sp.appendChild($(`<div class="small" style="margin-bottom:8px"><b class="gold">${G.liaisonCycle.offers.length} pitch${G.liaisonCycle.offers.length>1?"es":""}</b> on the table. Pick one, or decline and keep looking.</div>`));
     G.liaisonCycle.offers.forEach((o,i)=>{
       const bi=brandInfo(o.brand),tier=SHOE_TIERS[o.tier];
       const box=$(`<div style="margin-bottom:8px;padding:10px;border:1px solid var(--honey);border-radius:8px"></div>`);
@@ -7128,7 +7153,7 @@ function viewOffice(w){
     const dec=$(`<button class="btn sm sec">Decline all this year</button>`);dec.onclick=declineShoeOffers;sp.appendChild(dec);
     const fb=$(`<button class="btn sm sec" style="margin-left:6px">Release liaison</button>`);fb.onclick=fireLiaison;sp.appendChild(fb);
   }else{
-    sp.appendChild($(`<div class="small" style="margin-bottom:8px">The liaison is being evaluated by the brands. A pitch comes at season\u2019s end. Where you stand right now:</div>`));
+    sp.appendChild($(`<div class="small" style="margin-bottom:8px">The brands are still evaluating. A pitch comes at season's end. Where you stand:</div>`));
     ["gold","silver","bronze"].forEach(tier=>{
       const q=shoeQualifies(t,tier),open=!!openBrandInTier(tier);
       const status=q?(open?'<span class="gold">Interested \u2014 slot open</span>':'<span style="color:var(--draw)">Interested \u2014 must out-do a current club</span>'):'<span class="muted">Out of reach</span>';
@@ -7161,7 +7186,7 @@ function viewOffice(w){
      <div class="small ${G.coachRenewal?'':'muted'}" style="margin-top:2px">${G.coachRenewal&&G.coachRenewal.kind!=="trophy"?'<span class="injtag">CONTRACT EXPIRED</span>':`Contract: ${c.contract} season${c.contract===1?"":"s"} remaining`}${(c.unsettled||0)>0?` \u00B7 <span class="injtag">UNSETTLED \u00D7${c.unsettled}</span>`:""}</div>
      <div class="small muted" style="margin-top:4px">${COACH_TIERS[c.tier].desc}</div>
      <div class="small muted" style="margin-top:3px"><b>${tr.label}:</b> ${tr.desc}</div>
-     ${coachTier()>0?`<div class="small muted" style="margin-top:3px">His standing also makes rival clubs ${coachTier()*3}% likelier to sell to you.</div>`:""}
+     ${coachTier()>0?`<div class="small muted" style="margin-top:3px">Rival clubs are ${coachTier()*3}% likelier to sell to you.</div>`:""}
      <div class="small" style="margin-top:3px">${G.coachAuto?`<span class="gold">Running the team automatically</span> \u2014 he sets the side before every match. Change this in the Squad tab.`:`<span class="muted">You are picking the side yourself.</span> Delegate to him in the Squad tab.`}</div>
      ${c.age>=62?`<div class="small" style="margin-top:3px;color:var(--draw)">Nearing the end: coaches retire at 65.</div>`:""}
    </div>`));
@@ -7181,12 +7206,10 @@ function viewOffice(w){
      dis.onclick=()=>sackCoach();
      cc.appendChild(dis);
    }
- }else{
-   cc.appendChild($(`<div class="small muted" style="margin-bottom:8px">No head coach. You pick the side, the shape and the tactics yourself. Hire from the market below to unlock auto-setup \u2014 and choose carefully: every coach optimizes for something different.</div>`));
  }
  cc.appendChild($(`<div class="divider"></div>`));
  cc.appendChild($(`<h3 style="font-size:14px;margin-bottom:2px">Coach market</h3>
-   <div class="small muted" style="margin-bottom:8px">There is no single best hire \u2014 a trait changes what a coach aims at, not how hard he works. Big names refuse small clubs, rival clubs shop from this same list every summer, and a coach in work costs compensation to prise out. Your prestige: <b class="gold">${Math.round(t.prestige||0)}</b>.</div>`));
+   <div class="small muted" style="margin-bottom:8px">A trait changes what a coach aims at, not how good he is. Big names refuse small clubs, and one already in work costs compensation.<br>Your prestige: <b class="gold">${Math.round(t.prestige||0)}</b>.</div>`));
  G.coachPool.slice().sort((a,b)=>b.tier-a.tier||b.wage-a.wage).forEach(c=>{
    const tr=COACH_TRAITS[c.trait];
    const gated=(t.prestige||0)<c.prestigeReq;
@@ -7204,11 +7227,11 @@ function viewOffice(w){
    };
    cc.appendChild(row);
  });
- cc.appendChild($(`<div class="small muted" style="margin-top:4px">Coaches age and retire at 65 \u2014 an older name is cheaper because you are buying fewer years. Win silverware and yours may grow a tier\u2026 or get poached by a bigger club.</div>`));
+ cc.appendChild($(`<div class="small muted" style="margin-top:4px">Coaches retire at 65, so older names are cheaper. Win silverware and yours may improve, or get poached.</div>`));
  w.appendChild(cc);
 
  scc.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Scouting department</h3>
-   <div class="small muted" style="margin-bottom:8px">A better scout hires for more per week but makes scouting rival squads far cheaper, and reveals potential. Current: <b class="gold">${scoutInfo().label}</b> \u00B7 reveal cost ${money(scoutCost())}/club/season.</div>`));
+   <div class="small muted" style="margin-bottom:8px">Better scouts cost more but make scouting cheaper and reveal potential. Current: <b class="gold">${scoutInfo().label}</b> \u00B7 ${money(scoutCost())}/club/season.</div>`));
  [["gold","Gold"],["silver","Silver"],["bronze","Bronze"]].forEach(([key,lab])=>{
    const inf=SCOUT_TIERS[key];const active=G.scoutTier===key;
    const r=$(`<div class="row" style="margin:5px 0"><span class="small">${lab} \u00B7 ${money(scoutWageOf(key))}/wk \u00B7 reveal ${money(scoutRevealOf(key))}/club</span></div>`);
@@ -7222,7 +7245,7 @@ function viewOffice(w){
    rel.onclick=()=>{G.scoutTier=null;saveGame(true);render()};scc.appendChild(rel);
  }
  scc.appendChild($(`<div class="divider"></div>`));
- scc.appendChild($(`<div class="small"><b>Chief Scout</b> \u00B7 ${money(superScoutCost())}/yr (${money(Math.round(superScoutCost()/SEASON_LEN))}/matchday on the wage bill) \u00B7 scours all regions and delivers a shortlist of the best young talent on Day 1 of each transfer window.</div>`));
+ scc.appendChild($(`<div class="small"><b>Chief Scout</b> \u00B7 ${money(superScoutCost())}/yr (${money(Math.round(superScoutCost()/SEASON_LEN))}/matchday). Delivers a shortlist of the best young talent on Day 1 of each window.</div>`));
  const ssRow=$(`<div class="row" style="margin-top:6px"></div>`);
  if(G.superScout){
    ssRow.appendChild($(`<span class="small gold">Employed \u2605</span>`));
@@ -7242,7 +7265,7 @@ function viewOffice(w){
  // staff
  const stc=$(`<div class="card"></div>`);
  stc.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Staff</h3>
-   <div class="small muted" style="margin-bottom:8px">One hire per role. Wages by quality: \u2605 ${money(staffWageOf(1))}/wk up to \u2605\u2605\u2605\u2605\u2605 ${money(staffWageOf(5))}/wk.</div>`));
+   <div class="small muted" style="margin-bottom:8px">One hire per role. \u2605 ${money(staffWageOf(1))}/wk up to \u2605\u2605\u2605\u2605\u2605 ${money(staffWageOf(5))}/wk.</div>`));
  for(const role in STAFF_ROLES){
    const mine=G.myStaff[role];
    const box=$(`<div style="margin-bottom:10px">
@@ -7281,12 +7304,12 @@ function viewOffice(w){
  // save controls
  const sc=$(`<div class="card"></div>`);
  sc.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">Save</h3>
-   <div class="small muted" style="margin-bottom:8px">Auto-saves after every matchday to this browser on this device.</div>`));
+   <div class="small muted" style="margin-bottom:8px">Saves after every matchday, to this browser on this device.</div>`));
  const sv=$(`<button class="btn" style="margin-bottom:8px">Save now</button>`);
  sv.onclick=()=>saveGame(false);
  sc.appendChild(sv);
  sc.appendChild($(`<div class="divider"></div>`));
- sc.appendChild($(`<div class="small muted" style="margin-bottom:8px">Download a backup you can keep or move to another device. Clearing site data \u2014 and Safari's automatic cleanup \u2014 can erase the browser save, so export now and then.</div>`));
+ sc.appendChild($(`<div class="small muted" style="margin-bottom:8px">Download a backup, or move your career to another device. Clearing site data wipes the browser save.</div>`));
  const exp=$(`<button class="btn" style="margin-bottom:8px">Export backup</button>`);
  exp.onclick=()=>exportSave();
  sc.appendChild(exp);
@@ -7311,17 +7334,17 @@ function viewCup(w){
    :c.phase==="group"?`Group stage \u00B7 ${grTag(c.round)} plays after matchday ${CUP_GROUP_MARKS[c.round]}`
    :`${KO_NAMES[c.koStage]} plays after matchday ${CUP_KO_MARKS[c.koStage]}`;
  hc.appendChild($(`<div class="small" style="margin:6px 0 4px">${status}</div>`));
- hc.appendChild($(`<div class="small muted">Format: 6 groups of 5. Top 2 per group plus the 4 best third-place clubs reach the Round of 16, then knockout to the Final.</div>`));
+ hc.appendChild($(`<div class="small muted">6 groups of 5. Top 2 in each group plus the 4 best third-placed clubs reach the Round of 16.</div>`));
  w.appendChild(hc);
 
  // Continental Cup panel (last season result + this year's qualification hint)
  const cc=$(`<div class="card"></div>`);
  cc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\u2b50 ${CONT_CUP}</h3>
-   <div class="small muted" style="margin-bottom:6px">Played at season's end: the top 5 clubs from every region's top division meet in a knockout. Reach your region's top 5 to qualify.</div>`));
+   <div class="small muted" style="margin-bottom:6px">The top 5 from every region's top division, in a knockout at season's end.</div>`));
  if(G.lastCont){
    cc.appendChild($(`<div class="small" style="margin-bottom:4px">Last season: <b class="gold">${G.lastCont.winner}</b> lifted the ${CONT_CUP}.${G.lastCont.qualified?" You qualified.":""}</div>`));
    G.lastCont.log.slice(0,6).forEach(e=>cc.appendChild($(`<div class="logline"><span class="muted">${e.round}</span><span>${e.line}</span></div>`)));
- }else cc.appendChild($(`<div class="small muted">No edition played yet. Finish a season to see the first Conrad Cup.</div>`));
+ }else cc.appendChild($(`<div class="small muted">Not played yet. Finish a season to see the first one.</div>`));
  w.appendChild(cc);
 
  // your group
@@ -7337,7 +7360,7 @@ function viewCup(w){
      `<td class="gold"><b>${s.Pts}</b></td></tr>`;
  }).join("");
  gc.appendChild($(`<table><thead><tr><th class="l">Pos</th><th class="l">Club</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead><tbody>${rows}</tbody></table>`));
- gc.appendChild($(`<div class="small muted" style="margin-top:6px">Green edge = qualifying spots. The four best third-placed clubs also go through.</div>`));
+ gc.appendChild($(`<div class="small muted" style="margin-top:6px">Green edge = through. The 4 best third-placed clubs also qualify.</div>`));
  w.appendChild(gc);
 
  // your cup fixtures
@@ -7368,7 +7391,7 @@ function viewCup(w){
  // ---- World Cup ----
  const wcc=$(`<div class="card"></div>`);
  wcc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\u2691 ${WORLD_CUP}</h3>
-   <div class="small muted" style="margin-bottom:6px">Every 4 seasons the 32 strongest nations (top 20 players each) contest a knockout. Next in ${G.wcYearsLeft||4} season${(G.wcYearsLeft||4)===1?'':'s'}.</div>`));
+   <div class="small muted" style="margin-bottom:6px">32 nations, top 20 players each, every 4 seasons. Next in ${G.wcYearsLeft||4} season${(G.wcYearsLeft||4)===1?'':'s'}.</div>`));
  if(G.lastWC){
    const wc=G.lastWC;
    wcc.appendChild($(`<div class="small" style="margin-bottom:4px">Reigning champion (Season ${wc.season}): <b class="gold">${wc.champion}</b></div>`));
@@ -7413,7 +7436,7 @@ function viewCup(w){
  // ---- Tippy Cup ----
  const tpc=$(`<div class="card"></div>`);
  tpc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\u2728 Tippy Cup</h3>
-   <div class="small muted" style="margin-bottom:6px">Contested every 4 seasons, two seasons after each World Cup, between four continental teams \u2014 N. America, S. America, Europe and Africa \u2014 each built from its 20 best players by nationality. Next in ${G.tippyYearsLeft||4} season${(G.tippyYearsLeft||4)===1?'':'s'}.</div>`));
+   <div class="small muted" style="margin-bottom:6px">N. America, S. America, Europe and Africa, each from its 20 best players. Every 4 seasons, two after the World Cup. Next in ${G.tippyYearsLeft||4} season${(G.tippyYearsLeft||4)===1?'':'s'}.</div>`));
  if(G.lastTippy){
    const tc=G.lastTippy;
    tpc.appendChild($(`<div class="small" style="margin-bottom:4px">Reigning champion (Season ${tc.season}): <b class="gold">${tc.champion}</b></div>`));
@@ -7454,14 +7477,14 @@ function viewCup(w){
  {const spc=$(`<div class="card"></div>`);
   const last=(G.cups.super||[]).slice(-1)[0];
   spc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\u2606 ${SUPER_CUP}</h3>
-    <div class="small muted" style="margin-bottom:6px">The four regional cup winners meet after the ${CONT_CUP}: two rounds, one champion. Win your regional cup and you are in it. Champion takes ${money(IN(SUPER_TITLE_BONUS))}.</div>`));
+    <div class="small muted" style="margin-bottom:6px">The four regional cup winners, played after the ${CONT_CUP}. Win your regional cup to get in. Champion takes ${money(IN(SUPER_TITLE_BONUS))}.</div>`));
   const live=G.superLive;
   if(live&&live.log&&live.log.length){
     live.log.slice(0,4).forEach(e=>spc.appendChild($(`<div class="logline"><span class="muted">${e.round}</span><span>${e.line}</span></div>`)));
   }else if(last){
     spc.appendChild($(`<div class="logline"><span class="muted">Season ${last.season} champions</span><span class="gold">${last.winner}</span></div>`));
     if(G.lastSuper&&G.lastSuper.log)G.lastSuper.log.slice(0,4).forEach(e=>spc.appendChild($(`<div class="logline"><span class="muted">${e.round}</span><span>${e.line}</span></div>`)));
-  }else spc.appendChild($(`<div class="small muted">Not yet contested. It is decided at the end of the season.</div>`));
+  }else spc.appendChild($(`<div class="small muted">Not played yet. Decided at season's end.</div>`));
   const ut=userTeamObj();
   if(ut&&(ut.superTitles||0)>0)
     spc.appendChild($(`<div class="small gold" style="margin-top:6px">${ut.name} have won it ${ut.superTitles} time${ut.superTitles===1?"":"s"}.</div>`));
@@ -7529,7 +7552,7 @@ function viewWorld(w){
  WORLD_TEAM=null;
  const sc=$(`<div class="card"></div>`);
  sc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">Clubs of the world</h3>
-   <div class="small muted" style="margin-bottom:6px">Tap a club to view trophies, scorers, and scout their squad. Scout status: <b class="gold">${scoutInfo().label}</b>.</div>`));
+   <div class="small muted" style="margin-bottom:6px">Tap a club for trophies, scorers and scouting. Your scout: <b class="gold">${scoutInfo().label}</b>.</div>`));
  w.appendChild(sc);
  if(WORLD_REGION===null)WORLD_REGION=userRegionKey();
  const rt=$(`<div class="row" style="gap:4px;margin-bottom:6px"></div>`);
@@ -7546,7 +7569,7 @@ function viewWorld(w){
    const gl=globalPrestige();
    const hd=$(`<div class="card"></div>`);
    hd.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">Prestige across the universe</h3>
-     <div class="small muted">All ${gl.length} clubs from every region, ranked by standing. Tap any club to view it.</div>`));
+     <div class="small muted">All ${gl.length} clubs, every region, ranked. Tap one to view it.</div>`));
    w.appendChild(hd);
    const tb=$(`<div class="card" style="padding:6px 10px"></div>`);
    gl.forEach((t,i)=>{
@@ -7602,7 +7625,7 @@ function viewWorldTeam(w,id){
      tc.appendChild($(`<div class="small"><b class="gold">${traitOf(t).label}</b></div>
        <div class="small muted" style="margin-top:3px">${traitOf(t).desc}</div>`));
    else
-     tc.appendChild($(`<div class="small muted">Unknown. Scout this club to learn how they do business.</div>`));
+     tc.appendChild($(`<div class="small muted">Unknown. Scout this club to find out.</div>`));
    w.appendChild(tc);
  }
  w.appendChild(trophyCard(t));
@@ -7615,11 +7638,11 @@ function viewWorldTeam(w,id){
  const sInfo=scoutInfo();
  if(!seen){
    const sc=$(`<div class="card center"></div>`);
-   sc.appendChild($(`<div class="small" style="margin-bottom:8px">Their squad is hidden. Scout them to reveal the roster${canSeePot(id)?" and player potential":""} for the rest of this season.</div>`));
+   sc.appendChild($(`<div class="small" style="margin-bottom:8px">Squad hidden. Scout them to see the roster${canSeePot(id)?" and player potential":""} for the rest of the season.</div>`));
    const b=$(`<button class="btn">Scout squad \u00B7 ${money(IN(sInfo.cost))}</button>`);
    b.disabled=userTeamObj().budget<IN(sInfo.cost);
    b.onclick=()=>buyScout(id);sc.appendChild(b);
-   if(!canSeePot(id))sc.appendChild($(`<div class="small muted" style="margin-top:6px">Without a scout on staff you can see names and ratings, but not potential. Hire a Bronze, Silver or Gold scout in the Office.</div>`));
+   if(!canSeePot(id))sc.appendChild($(`<div class="small muted" style="margin-top:6px">Names and ratings only. Hire a scout in the Office to see potential.</div>`));
    w.appendChild(sc);
    return;
  }
