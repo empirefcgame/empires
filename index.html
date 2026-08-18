@@ -17,6 +17,9 @@
 <meta name="apple-mobile-web-app-title" content="Empire FC">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<!-- Umami. Deferred and fire-and-forget: track() below is written so a blocked or
+     failed load leaves the game completely unaffected. -->
+<script defer src="https://cloud.umami.is/script.js" data-website-id="a8fbb6a0-8d71-4a8a-bf6d-599359918285"></script>
 <style>
   :root{
     --night:#0d1531; --night2:#122048; --panel:#16295c; --panel2:#1d3570;
@@ -146,7 +149,6 @@
   .toast{background:var(--panel2);
     border:1px solid var(--honey);color:var(--parch);padding:10px 16px;border-radius:8px;font-size:12px;max-width:100%}
 </style>
-     <script defer src="https://cloud.umami.is/script.js" data-website-id="a8fbb6a0-8d71-4a8a-bf6d-599359918285"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -6682,6 +6684,10 @@ function leagueTable(regionKey,tier,mark){
 
 /* ---------- TRANSFERS ---------- */
 let MKT_SORT="ovr";let MKT_POS="ALL";let MKT_TAB="free";
+/* The pool is roughly five hundred players, so it is paged. Any change to the tab,
+   the position filter or the sort order invalidates the page number, hence mktReset(). */
+let MKT_PAGE=0;const MKT_PER=40;
+function mktReset(){MKT_PAGE=0;}
 function viewTransfers(w){
  const t=userTeamObj();
  const open=inWindow();
@@ -6763,8 +6769,8 @@ function viewTransfers(w){
  const tabRow=$(`<div class="row" style="gap:4px;margin-bottom:10px"></div>`);
  const fTab=$(`<button class="btn sm ${MKT_TAB==='free'?'':'sec'}" style="flex:1">Free agents (${G.freeAgents.length})</button>`);
  const sTab=$(`<button class="btn sm ${MKT_TAB==='scouted'?'':'sec'}" style="flex:1">Scouted players (${scoutedPlayers.length})</button>`);
- fTab.onclick=()=>{MKT_TAB='free';render()};
- sTab.onclick=()=>{MKT_TAB='scouted';render()};
+ fTab.onclick=()=>{MKT_TAB='free';mktReset();render()};
+ sTab.onclick=()=>{MKT_TAB='scouted';mktReset();render()};
  tabRow.appendChild(fTab);tabRow.appendChild(sTab);mc.appendChild(tabRow);
  if(MKT_TAB==='scouted'&&!scoutedTeamIds.length){
    mc.appendChild($(`<div class="small muted" style="padding:8px 0">Nothing scouted yet. Scout a club from the World tab and its players show up here.</div>`));
@@ -6776,19 +6782,25 @@ function viewTransfers(w){
  const pf=$(`<div class="row" style="gap:4px;margin-bottom:8px"></div>`);
  ["ALL","GK","DEF","MID","FWD"].forEach(pos=>{
    const b=$(`<button class="btn sm ${MKT_POS===pos?'':'sec'}" style="flex:1">${pos}</button>`);
-   b.onclick=()=>{MKT_POS=pos;render()};pf.appendChild(b);
+   b.onclick=()=>{MKT_POS=pos;mktReset();render()};pf.appendChild(b);
  });
  mc.appendChild(pf);
  if(!hasScout&&MKT_SORT==="pot")MKT_SORT="ovr";
  const sortOpts=[["ovr","Rating"],...(hasScout?[["pot","Potential"]]:[]),["value","Value (low\u2192high)"],["age","Age (young\u2192old)"]];
  const sortSel=$(`<select style="margin-bottom:8px">${sortOpts.map(([k,l])=>`<option value="${k}" ${k===MKT_SORT?'selected':''}>${l}</option>`).join("")}</select>`);
- sortSel.onchange=()=>{MKT_SORT=sortSel.value;render()};
+ sortSel.onchange=()=>{MKT_SORT=sortSel.value;mktReset();render()};
  mc.appendChild(sortSel);
  if(!hasScout)mc.appendChild($(`<div class="small muted" style="margin-bottom:6px">Hire a Scout in the Office to reveal potential (POT).</div>`));
  const basePool=MKT_TAB==='scouted'?scoutedPlayers:G.freeAgents.map(P);
  let fa=basePool.filter(p=>p&&(MKT_POS==="ALL"||p.pos===MKT_POS));
  fa.sort((a,b)=> MKT_SORT==="value"?a.value-b.value : MKT_SORT==="age"?a.age-b.age : b[MKT_SORT]-a[MKT_SORT]);
- fa=fa.slice(0,40);
+ // Signing a player shrinks the pool, so clamp rather than trust the stored page.
+ const faTotal=fa.length;
+ const faPages=Math.max(1,Math.ceil(faTotal/MKT_PER));
+ if(MKT_PAGE>=faPages)MKT_PAGE=faPages-1;
+ if(MKT_PAGE<0)MKT_PAGE=0;
+ const faFrom=MKT_PAGE*MKT_PER;
+ fa=fa.slice(faFrom,faFrom+MKT_PER);
  const faRows=fa.map(p=>{
    const isScouted=MKT_TAB==='scouted';
    const refused=isScouted&&G.refused&&G.refused[p.id];
@@ -6809,7 +6821,21 @@ function viewTransfers(w){
    MKT_TAB==='scouted'?buyPlayer(P(+b.dataset.sign)):signPlayer(P(+b.dataset.sign))});
  wireNames(ftab);
  const ftabWrap=$(`<div class="tscroll"></div>`);ftabWrap.appendChild(ftab);
- mc.appendChild(ftabWrap);w.appendChild(mc);
+ mc.appendChild(ftabWrap);
+ if(!faTotal){
+   mc.appendChild($(`<div class="small muted center" style="padding:8px 0">Nobody here matches that filter.</div>`));
+ }else{
+   const pager=$(`<div class="row" style="gap:6px;align-items:center;margin-top:10px"></div>`);
+   const prev=$(`<button class="btn sm sec" ${MKT_PAGE<=0?'disabled':''}>\u2190 Prev</button>`);
+   const next=$(`<button class="btn sm sec" ${MKT_PAGE>=faPages-1?'disabled':''}>Next \u2192</button>`);
+   prev.onclick=()=>{MKT_PAGE--;render()};
+   next.onclick=()=>{MKT_PAGE++;render()};
+   pager.appendChild(prev);
+   pager.appendChild($(`<div class="small muted center" style="flex:1">${faFrom+1}\u2013${faFrom+fa.length} of ${faTotal} \u00B7 page ${MKT_PAGE+1}/${faPages}</div>`));
+   pager.appendChild(next);
+   mc.appendChild(pager);
+ }
+ w.appendChild(mc);
 
  // pointer to World tab for club-to-club deals
  w.appendChild($(`<div class="card small muted center">To buy from another club, open the <b>World</b> tab, tap a club, scout it, then make an offer during the window.</div>`));
