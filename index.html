@@ -365,7 +365,6 @@ const SCOUT_TIERS={   // roster reveal cost per club, resets each season
   bronze:{label:"Bronze Scout",cost:400000,pot:true,wage:8000},
   silver:{label:"Silver Scout",cost:250000,pot:true,wage:16000},
   gold:{label:"Gold Scout",cost:100000,pot:true,wage:30000}};
-const XFER_PER_OVR=1000000;
 /* No cup name carries a leading article. Sentences that need one write it in lowercase
    themselves ("lifted the Liahona Cup"), which is the only way a set of names that
    includes "Copa Paraguay" can read correctly everywhere. */
@@ -377,7 +376,7 @@ function cupName(regionKey){return REGION_CUP[regionKey||userRegionKey()]||"Regi
 /* Kept as the single display accessor even though no name now carries an article, so
    that a future cup added with one cannot leak "The" into a legend or a chip. */
 function cupLabel(regionKey){return cupName(regionKey).replace(/^The /,"");}
-Object.defineProperty(globalThis,"CUP",{get(){try{return G&&G.userTeam!=null?cupName(userRegionKey()):"Regional Cup"}catch(e){return "Regional Cup"}}});
+Object.defineProperty(globalThis,"CUP",{configurable:true,get(){try{return G&&G.userTeam!=null?cupName(userRegionKey()):"Regional Cup"}catch(e){return "Regional Cup"}}});
 const CONT_CUP="Conrad Cup";
 const WORLD_CUP="World Cup";
 const SEASON_LEN=18;                      // 10-club double round-robin
@@ -727,7 +726,7 @@ const _TI=new Map();
 function rebuildTeamIndex(){_TI.clear();G.teams.forEach(t=>_TI.set(t.id,t));}
 const T=id=>_TI.get(id);
 function rebuildIndex(){PM.clear();G.players.forEach(p=>PM.set(p.id,p));rebuildTeamIndex();}
-function squadOf(t){return t.squad.map(P);}
+function squadOf(t){return((t&&t.squad)||[]).map(P).filter(Boolean);}
 /* ---- academy helpers ---- */
 function academyOf(t){return((t&&t.academy)||[]).map(P).filter(Boolean);}
 function inAcademy(p){const t=p&&p.team!=null?T(p.team):null;return !!(t&&(t.academy||[]).includes(p.id));}
@@ -1023,7 +1022,7 @@ function tierClubs(regionKey,tier){
  return r&&r[tier]?r[tier]:[];   // unknown region: an empty tier, not a thrown screen
 }
 function userRegionKey(){const t=T(G.userTeam);return t?t.region:REGIONS[0].key;}
-function userRegionKeySafe(){const t=T(G.userTeam);return t?t.region:REGIONS[0].key;}
+const userRegionKeySafe=userRegionKey;   // same lookup, kept as an alias for older call sites
 function makeFixtures(n){
  let arr=[...Array(n).keys()];if(n%2)arr.push(-1);
  const m=arr.length,rounds=[];
@@ -4159,7 +4158,10 @@ function endSeason(){
  const mine=G._bootWinners.find(b=>b.region===ureg);
  if(mine&&(!boot||mine.id!==boot.id))
    logAdd(`${regionOf(ureg).name} Golden Boot: ${mine.name} (${mine.club}) with ${mine.goals}.`);
- G.history.push({season:G.season,tier:_playedTier,rank:_myRank,boot:boot?`${boot.name} (${boot.gs})`:"?",
+ // The honours row is regional (league + regional cup), so the Boot on it is the
+ // region's winner, not the world top scorer.
+ G.history.push({season:G.season,tier:_playedTier,rank:_myRank,
+   boot:mine?`${mine.name} (${mine.goals})`:(boot?`${boot.name} (${boot.gs})`:"?"),
    champ:RT[ureg][0][0].name,region:ureg,
    cup:G.cup&&G.cup.winner!==null?T(G.cup.winner).name:"—",
    promo:promoted.has(G.userTeam),releg:relegated.has(G.userTeam)});
@@ -5609,6 +5611,9 @@ function advanceWindowDay(){
 
 /* ======================= UI ======================= */
 let TAB="club";let START_REGION=null;
+/* The start screen is rebuilt from scratch on every region tap, so the name field is a
+   brand new <input> each time. The typed value lives out here or it is lost. */
+let START_OWNER="";
 const $=(h)=>{const d=document.createElement("div");d.innerHTML=h;return d.firstElementChild};
 const app=document.getElementById("app");
 let TOAST_BOX=null;
@@ -5718,9 +5723,15 @@ function crestSVG(){return `<svg class="crest" viewBox="0 0 48 48" fill="none" r
    font-family="'Open Sans',system-ui,sans-serif" font-weight="800" font-size="14"
    fill="#ffd94d">EFC</text></svg>`;}
 
+/* render() rebuilds the whole page, which used to drop the player at the top of the list
+   every time they signed a player, placed a bet or turned a market page. Scroll is kept
+   across a re-render of the SAME tab and reset when the tab actually changes. */
+let _lastTab=null;
 function render(){
  if(!G||G.userTeam===null){renderStart();return;}
  ensureXI();
+ const keep=_lastTab===TAB?(window.scrollY||document.documentElement.scrollTop||0):0;
+ _lastTab=TAB;
  app.innerHTML="";
  app.appendChild($(`<header>${crestSVG()}
    <div class="t"><h1>Empire FC</h1>
@@ -5739,6 +5750,7 @@ function render(){
    world:viewWorld,office:viewOffice}[TAB])(wrap);
  app.appendChild(wrap);
  app.appendChild(nav());
+ window.scrollTo(0,keep);
 }
 function nav(){
  const items=[["club","\u2302","Club"],["squad","\u26BD","Squad"],["league","\u2691","League"],
@@ -5782,7 +5794,9 @@ function renderStart(){
   s.appendChild($(`<div class="divider"></div>`));}
 
  s.appendChild($(`<div class="lbl" style="margin-bottom:6px">Your name, President</div>`));
- const nameIn=$(`<input type="text" maxlength="24" placeholder="Your name" value="${G&&G.owner!=="President"?G.owner:""}">`);
+ if(!START_OWNER&&G&&G.owner&&G.owner!=="President")START_OWNER=G.owner;
+ const nameIn=$(`<input type="text" maxlength="24" placeholder="Your name" value="${START_OWNER.replace(/[<>&"]/g,"")}">`);
+ nameIn.oninput=()=>{START_OWNER=nameIn.value;};
  s.appendChild(nameIn);
  s.appendChild($(`<div class="small muted" style="margin:10px 0 4px">Pick a region, then the club you will run</div>`));
 
@@ -6671,7 +6685,8 @@ function leagueTable(regionKey,tier,mark){
  const rows=tbl.map((tm,i)=>{
    const gd=tm.st.GF-tm.st.GA;
    let cls=tm.id===G.userTeam&&mark?"me ":"";
-   if(i<2)cls+="promo";else if(i>=8)cls+="releg";
+   // tier 0 is the top flight: nothing above it, so no green stripe there
+   if(i<2&&tier>0)cls+="promo";else if(i>=8)cls+="releg";
    return `<tr class="${cls}"><td class="l muted">${i+1}</td><td class="l">${tm.name}${shoeMark(tm)}</td>`+
      `<td>${tm.st.P}</td><td>${tm.st.W}</td><td>${tm.st.D}</td><td>${tm.st.L}</td>`+
      `<td class="${gd>0?'res-w':gd<0?'res-l':''}">${gd>0?'+':''}${gd}</td>`+
@@ -7570,7 +7585,7 @@ let WORLD_TEAM=null;let WORLD_REGION=null;
 /* UI selections live outside G, so after an import or a wipe they can still point at a
    club or a market filter that belonged to the previous career. Reset them together. */
 function resetUiState(){
- TAB="club";START_REGION=null;
+ TAB="club";_lastTab=null;START_REGION=null;START_OWNER="";MKT_PAGE=0;
  MKT_SORT="ovr";MKT_POS="ALL";MKT_TAB="free";
  WORLD_TEAM=null;WORLD_REGION=null;
 }
