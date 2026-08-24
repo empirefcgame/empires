@@ -7240,79 +7240,12 @@ function upcomingFixture(){
  for(const[i,j]of fx){if(i===li||j===li)return{home:i===li,opp:T(tt[i===li?j:i]).name}}
  return null;
 }
-function viewClub(w){
- const t=userTeamObj();
- const ovr=Math.round(squadOf(t).reduce((a,p)=>a+p.ovr,0)/t.squad.length);
- w.appendChild($(`<div class="card">
-   <div class="row"><h2 style="font-size:21px">${t.name}</h2>${tierTag(t)}</div>
-   <div class="small muted">${regionOf(t.region).name} \u00B7 <span class="gold">${prestigeLabel(t.prestige||0)}</span> (${Math.round(t.prestige||0)})</div>
-   <div class="divider"></div>
-   <div class="row">
-     <div class="stat"><div class="lbl">Squad</div><div class="big">${ovr}</div></div>
-     <div class="stat"><div class="lbl">Budget</div><div class="big" style="${t.budget<0?'color:var(--loss)':''}">${money(t.budget)}</div></div>
-     <div class="stat"><div class="lbl">Wages/wk</div><div class="big">${money(squadWage(t)+staffWage())}</div></div>
-   </div></div>`));
-
- const tbl=standingsOf(t.region,t.tier);const rank=tbl.indexOf(t)+1;
- const cupStatus=cupShort();
- w.appendChild($(`<div class="card"><div class="row">
-   <div><div class="lbl">League</div><div class="big">${rank}<span class="muted" style="font-size:14px">/10</span></div></div>
-   <div class="center"><div class="lbl">Record</div><div style="font-weight:800;font-size:17px">
-     <span class="res-w">${t.st.W}</span>-<span class="res-d">${t.st.D}</span>-<span class="res-l">${t.st.L}</span></div></div>
-   <div class="center"><div class="lbl">${CUP}</div><div style="font-weight:800;font-size:13px;color:var(--honey2)">${cupStatus}</div></div>
- </div></div>`));
-
- if(G.lastResults){
-   const mine=G.lastResults.find(r=>r.h===G.userTeam||r.a===G.userTeam);
-   if(mine){
-     const home=mine.h===G.userTeam;
-     const opp=T(home?mine.a:mine.h).name;
-     const gf=home?mine.hg:mine.ag, ga=home?mine.ag:mine.hg;
-     const res=gf>ga?"res-w":gf<ga?"res-l":"res-d";
-     const tag=gf>ga?"WON":gf<ga?"LOST":"DREW";
-     w.appendChild($(`<div class="card center">
-       <div class="lbl">${home?"Home":"Away"} vs ${opp}</div>
-       <div class="scoreline ${res}">${gf} \u2013 ${ga}</div>
-       <div class="small ${res}" style="font-weight:700">${tag}</div>
-       ${G.lastScorers&&G.lastScorers.mine.length?`<div class="small muted" style="margin-top:5px">\u26BD ${[...new Set(G.lastScorers.mine)].map(n=>{const c=G.lastScorers.mine.filter(x=>x===n).length;return n+(c>1?" \u00D7"+c:"")}).join(", ")}</div>`:""}</div>`));
-   }
- }
-
- // The league result card above only ever knows about the league. Now that a cup tie
- // is played on its own tap, its scoreline deserves the same treatment.
- {const cg=(G.cup&&G.cup.userGames||[]).filter(x=>x.played&&!x.rest&&x.gf!=null);
-  const last=cg.length?cg[cg.length-1]:null;
-  if(last&&last.md===G.matchday&&!G.pendingCup){
-    const res=last.gf>last.ga?"res-w":last.gf<last.ga?"res-l":"res-d";
-    const tag=last.gf>last.ga?"WON":last.gf<last.ga?"LOST":"DREW";
-    w.appendChild($(`<div class="card center" style="border-color:var(--grana)">
-      <div class="lbl">${cupLabel(t.region)} \u00B7 ${last.round} \u00B7 ${last.home?"Home":"Away"} vs ${T(last.opp)?T(last.opp).name:"\u2014"}</div>
-      <div class="scoreline ${res}">${last.gf} \u2013 ${last.ga}</div>
-      <div class="small ${res}" style="font-weight:700">${tag}${last.pens?" ON PENALTIES":""}</div></div>`));
-  }}
-
- // The president's own basketball result for the week, sitting under the football
- // scorelines so both codes read the same way on the same screen.
- {const f=bbMine(),r=G.bb&&G.bb.lastResult;
-  if(f&&r&&r.md===G.matchday){
-    const res=r.pf>r.pa?"res-w":"res-l";
-    const std=bbStandings(),pos=std.findIndex(x=>x.id===f.id)+1;
-    w.appendChild($(`<div class="card center" style="border-color:#7be3a4">
-      <div class="lbl">${BB_LEAGUE} \u00B7 ${r.home?"Home":"Away"} vs ${r.opp}</div>
-      <div class="scoreline ${res}">${r.pf} \u2013 ${r.pa}</div>
-      <div class="small ${res}" style="font-weight:700">${r.pf>r.pa?"WON":"LOST"}</div>
-      <div class="small muted" style="margin-top:5px">${bbTeamName(f)} ${f.w}-${f.l} \u00B7 ${ordinal(pos)} of ${BB_TEAMS}${pos<=BB_CUP_FIELD?` \u00B7 in the ${BB_CUP} places`:` \u00B7 outside the ${BB_CUP} places`}</div></div>`));
-  }}
-
- const retirees=squadOf(t).filter(p=>p.age>=40);
- if(retirees.length)
-   w.appendChild($(`<div class="card small"><span class="ret">R</span>
-     ${retirees.map(p=>p.name).join(", ")} ${retirees.length>1?"are":"is"} in a final season and will retire at year's end. Sell now or lose the value.</div>`));
-
- // trophies + all-time goal leaders
- w.appendChild(trophyCard(t));
- w.appendChild(clubLegendsCard(t,"Club goalscoring record"));
-
+/* The main action of the week: the window advance, the cup tie, the league matchday,
+   or the season-end cup chain. Lifted out of viewClub so it can sit directly under
+   the scorelines instead of below the trophy cabinet and the goalscoring records,
+   which meant scrolling past a screenful of history to press the only button that
+   moves the game forward. */
+function clubActionBlock(w,t){
  // Clear priority: window first, then in-season play, then season-end advance.
  if(inWindow()){
    w.appendChild($(`<div class="card center" style="border-color:var(--honey)">
@@ -7336,10 +7269,10 @@ function viewClub(w){
    w.appendChild(b);
 
  }else if(G.matchday<SEASON_LEN){
+   // The separate "Next fixture" card is gone: the opponent rides on the button itself,
+   // so the action and its context are one thing rather than a card and a button.
    const nx=upcomingFixture();
-   w.appendChild($(`<div class="card row"><div class="lbl">Next fixture</div>
-     <div>${nx?`<b>${nx.home?"Home":"Away"}</b> vs ${nx.opp}`:`<span class="muted">League bye \u00B7 rest week</span>`}</div></div>`));
-   const b=$(`<button class="btn league">Play League Matchday ${G.matchday+1}</button>`);
+   const b=$(`<button class="btn league">Play Matchday ${G.matchday+1} \u00B7 ${nx?`${nx.home?"Home":"Away"} vs ${nx.opp}`:"League bye"}</button>`);
    b.onclick=()=>{playMatchday();render()};
    w.appendChild(b);
  }else{
@@ -7414,6 +7347,83 @@ function viewClub(w){
      }
    }
  }
+}
+
+function viewClub(w){
+ const t=userTeamObj();
+ const ovr=Math.round(squadOf(t).reduce((a,p)=>a+p.ovr,0)/t.squad.length);
+ w.appendChild($(`<div class="card">
+   <div class="row"><h2 style="font-size:21px">${t.name}</h2>${tierTag(t)}</div>
+   <div class="small muted">${regionOf(t.region).name} \u00B7 <span class="gold">${prestigeLabel(t.prestige||0)}</span> (${Math.round(t.prestige||0)})</div>
+   <div class="divider"></div>
+   <div class="row">
+     <div class="stat"><div class="lbl">Squad</div><div class="big">${ovr}</div></div>
+     <div class="stat"><div class="lbl">Budget</div><div class="big" style="${t.budget<0?'color:var(--loss)':''}">${money(t.budget)}</div></div>
+     <div class="stat"><div class="lbl">Wages/wk</div><div class="big">${money(squadWage(t)+staffWage())}</div></div>
+   </div></div>`));
+
+ const tbl=standingsOf(t.region,t.tier);const rank=tbl.indexOf(t)+1;
+ const cupStatus=cupShort();
+ w.appendChild($(`<div class="card"><div class="row">
+   <div><div class="lbl">League</div><div class="big">${rank}<span class="muted" style="font-size:14px">/10</span></div></div>
+   <div class="center"><div class="lbl">Record</div><div style="font-weight:800;font-size:17px">
+     <span class="res-w">${t.st.W}</span>-<span class="res-d">${t.st.D}</span>-<span class="res-l">${t.st.L}</span></div></div>
+   <div class="center"><div class="lbl">${CUP}</div><div style="font-weight:800;font-size:13px;color:var(--honey2)">${cupStatus}</div></div>
+ </div></div>`));
+
+ if(G.lastResults){
+   const mine=G.lastResults.find(r=>r.h===G.userTeam||r.a===G.userTeam);
+   if(mine){
+     const home=mine.h===G.userTeam;
+     const opp=T(home?mine.a:mine.h).name;
+     const gf=home?mine.hg:mine.ag, ga=home?mine.ag:mine.hg;
+     const res=gf>ga?"res-w":gf<ga?"res-l":"res-d";
+     const tag=gf>ga?"WON":gf<ga?"LOST":"DREW";
+     w.appendChild($(`<div class="card center">
+       <div class="lbl">${home?"Home":"Away"} vs ${opp}</div>
+       <div class="scoreline ${res}">${gf} \u2013 ${ga}</div>
+       <div class="small ${res}" style="font-weight:700">${tag}</div>
+       ${G.lastScorers&&G.lastScorers.mine.length?`<div class="small muted" style="margin-top:5px">\u26BD ${[...new Set(G.lastScorers.mine)].map(n=>{const c=G.lastScorers.mine.filter(x=>x===n).length;return n+(c>1?" \u00D7"+c:"")}).join(", ")}</div>`:""}</div>`));
+   }
+ }
+
+ // The league result card above only ever knows about the league. Now that a cup tie
+ // is played on its own tap, its scoreline deserves the same treatment.
+ {const cg=(G.cup&&G.cup.userGames||[]).filter(x=>x.played&&!x.rest&&x.gf!=null);
+  const last=cg.length?cg[cg.length-1]:null;
+  if(last&&last.md===G.matchday&&!G.pendingCup){
+    const res=last.gf>last.ga?"res-w":last.gf<last.ga?"res-l":"res-d";
+    const tag=last.gf>last.ga?"WON":last.gf<last.ga?"LOST":"DREW";
+    w.appendChild($(`<div class="card center" style="border-color:var(--grana)">
+      <div class="lbl">${cupLabel(t.region)} \u00B7 ${last.round} \u00B7 ${last.home?"Home":"Away"} vs ${T(last.opp)?T(last.opp).name:"\u2014"}</div>
+      <div class="scoreline ${res}">${last.gf} \u2013 ${last.ga}</div>
+      <div class="small ${res}" style="font-weight:700">${tag}${last.pens?" ON PENALTIES":""}</div></div>`));
+  }}
+
+ // The president's own basketball result for the week, sitting under the football
+ // scorelines so both codes read the same way on the same screen.
+ {const f=bbMine(),r=G.bb&&G.bb.lastResult;
+  if(f&&r&&r.md===G.matchday){
+    const res=r.pf>r.pa?"res-w":"res-l";
+    const std=bbStandings(),pos=std.findIndex(x=>x.id===f.id)+1;
+    w.appendChild($(`<div class="card center" style="border-color:#7be3a4">
+      <div class="lbl">${BB_LEAGUE} \u00B7 ${r.home?"Home":"Away"} vs ${r.opp}</div>
+      <div class="scoreline ${res}">${r.pf} \u2013 ${r.pa}</div>
+      <div class="small ${res}" style="font-weight:700">${r.pf>r.pa?"WON":"LOST"}</div>
+      <div class="small muted" style="margin-top:5px">${bbTeamName(f)} ${f.w}-${f.l} \u00B7 ${ordinal(pos)} on the table</div></div>`));
+  }}
+
+ // the button that moves the week on, directly under the scorelines
+ clubActionBlock(w,t);
+
+ const retirees=squadOf(t).filter(p=>p.age>=40);
+ if(retirees.length)
+   w.appendChild($(`<div class="card small"><span class="ret">R</span>
+     ${retirees.map(p=>p.name).join(", ")} ${retirees.length>1?"are":"is"} in a final season and will retire at year's end. Sell now or lose the value.</div>`));
+
+ // trophies + all-time goal leaders
+ w.appendChild(trophyCard(t));
+ w.appendChild(clubLegendsCard(t,"Club goalscoring record"));
 
  if(G.history.length){
    const h=G.history[G.history.length-1];
