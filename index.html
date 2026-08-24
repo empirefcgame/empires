@@ -52,15 +52,23 @@
   .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
   .big{font-size:21px;font-weight:800;color:var(--honey2)}
   .stat{flex:1;text-align:center}
+  /* A stat row where one label wraps to two lines and its neighbours do not used to
+     leave the numbers on different baselines. Stretch the cells and pin the value to
+     the bottom so the figures always line up however the labels break. */
+  .row.statrow{align-items:stretch}
+  .statrow .stat{display:flex;flex-direction:column;justify-content:space-between;gap:4px}
   .divider{height:1px;background:var(--line);margin:12px 0}
   button{font-family:inherit;cursor:pointer;border:none;border-radius:8px;font-size:13px}
   .btn{background:linear-gradient(180deg,var(--honey2),var(--honey));color:#241a00;
     font-weight:800;padding:12px 16px;width:100%;letter-spacing:.02em}
   .btn:active{transform:translateY(1px)}
   .btn.sec{background:var(--panel2);color:var(--parch);border:1px solid var(--line);font-weight:600}
-  .btn.league{background:linear-gradient(180deg,#ffe27a,#e0b93a);color:#241a00}
-  .btn.cup{background:linear-gradient(180deg,#ff8fc0,#d1447f);color:#3a0820}
-  .btn.cont{background:linear-gradient(180deg,#7be3a4,#3fa96a);color:#062615}
+  /* The three competition buttons are full-width and always sit between cards, so they
+     carry the same bottom gap a card does. The colour key that used to supply that gap
+     under the league button is gone: the button now names the competition outright. */
+  .btn.league{background:linear-gradient(180deg,#ffe27a,#e0b93a);color:#241a00;margin-bottom:12px}
+  .btn.cup{background:linear-gradient(180deg,#ff8fc0,#d1447f);color:#3a0820;margin-bottom:12px}
+  .btn.cont{background:linear-gradient(180deg,#7be3a4,#3fa96a);color:#062615;margin-bottom:12px}
   .btn.sm{padding:7px 11px;width:auto;font-size:12px}
   /* compact action buttons that live inside table rows without overflowing a phone */
   .btn.tiny{padding:5px 8px;width:auto;font-size:11px;white-space:nowrap;min-width:0;line-height:1.1}
@@ -4387,12 +4395,22 @@ function generateNarratives(RT,ureg,boot,promoted,relegated){
 }
 const PRESTIGE_MAX=100;
 function conradFloor(t){
- // Recent Conrad Cups are the single strongest prestige signal. A reigning continental
- // champion holds a high floor; back-to-back winners sit near the very top and cannot
- // be eroded by seasonal decay.
+ // A recent Conrad Cup is the strongest single prestige signal there is, and it holds
+ // its floor against seasonal decay. It is not, on its own, a claim to being the most
+ // prestigious club in the world.
+ //
+ // The floor used to be flat: one win pinned any club to 82, two to 92. A club that had
+ // never won anything could fluke a continental night and wake up ranked first on Earth,
+ // which is not how standing works. A one-off winner is a famous club now; the clubs
+ // above it are the ones that have been winning things for years. So the floor is
+ // anchored to the resume the club already had, and the crown lifts it from there.
  if(!t)return 0;
- const recent=(G.cups.continental||[]).filter(e=>e.winner===t.name&&e.region===t.region&&e.season>=G.season-3).length;
- return recent>=2?92:recent>=1?82:0;
+ const all=(G.cups.continental||[]).filter(e=>e.winner===t.name&&e.region===t.region);
+ const recent=all.filter(e=>e.season>=G.season-3).length;
+ if(!recent)return 0;
+ const resume=(t.leagueTitles||0)*2+(t.cupTitles||0)*1.5+all.length*6;
+ const base=recent>=2?70:58;
+ return clamp(base+resume,0,recent>=2?92:82);
 }
 function updatePrestige(RT){
  // everything decays a little each season, so past glory fades without new results
@@ -5614,7 +5632,16 @@ let TAB="club";let START_REGION=null;
 /* The start screen is rebuilt from scratch on every region tap, so the name field is a
    brand new <input> each time. The typed value lives out here or it is lost. */
 let START_OWNER="";
-const $=(h)=>{const d=document.createElement("div");d.innerHTML=h;return d.firstElementChild};
+/* $ used to return only firstElementChild, so any template with two or more top-level
+   elements silently lost everything after the first. That is why the Innovation Lab
+   cards showed a project name and nothing else, and why the details overlay printed
+   "If it works" with no effect under it: the sibling divs were being thrown away at
+   build time. Multi-root templates now come back as a fragment, which appendChild
+   expands in place. Single-root callers keep the element they have always had. */
+const $=(h)=>{const d=document.createElement("div");d.innerHTML=h;
+ if(d.children.length<2)return d.firstElementChild;
+ const f=document.createDocumentFragment();while(d.firstChild)f.appendChild(d.firstChild);
+ return f};
 const app=document.getElementById("app");
 let TOAST_BOX=null;
 function toast(msg){
@@ -6039,7 +6066,7 @@ function trophyCard(t){
  const cupSeasons=((G.cups&&G.cups.regional)||[]).filter(e=>e.winner===t.name&&e.region===t.region).map(e=>e.season);
  const contSeasons=((G.cups&&G.cups.continental)||[]).filter(e=>e.winner===t.name&&e.region===t.region).map(e=>e.season);
  const superSeasons=((G.cups&&G.cups.super)||[]).filter(e=>e.winner===t.name&&e.region===t.region).map(e=>e.season);
- const row=$(`<div class="row"></div>`);
+ const row=$(`<div class="row statrow"></div>`);
  const detail=$(`<div class="small center" style="margin-top:8px;display:none"></div>`);
  function mkStat(lbl,count,seasons){
    const s=$(`<div class="stat" style="cursor:pointer"><div class="lbl">${lbl}</div><div class="big">${count||0}</div></div>`);
@@ -6189,17 +6216,9 @@ function viewClub(w){
    const nx=upcomingFixture();
    w.appendChild($(`<div class="card row"><div class="lbl">Next fixture</div>
      <div>${nx?`<b>${nx.home?"Home":"Away"}</b> vs ${nx.opp}`:`<span class="muted">League bye \u00B7 rest week</span>`}</div></div>`));
-   // a cup tie of YOURS follows this matchday on its own tap; a round you have no
-   // stake in still settles inside the league sim and is never mentioned here
-   const cupNext=ALL_CUP_MARKS.includes(G.matchday+1)&&!!userCupTieAt(G.matchday+1);
    const b=$(`<button class="btn league">Play League Matchday ${G.matchday+1}</button>`);
    b.onclick=()=>{playMatchday();render()};
    w.appendChild(b);
-
-   w.appendChild($(`<div class="small muted center" style="margin-top:6px">
-     <span style="color:#e0b93a">\u25A0</span> League \u00B7
-     <span style="color:#d1447f">\u25A0</span> ${cupLabel(t.region)} \u00B7
-     <span style="color:#3fa96a">\u25A0</span> ${CONT_CUP}</div>`));
  }else{
    // Season over: the Conrad Cup plays now — round by round if you're in it.
    const advance=()=>{const before=userTeamObj().tier;endSeason();
@@ -6290,7 +6309,7 @@ function viewClub(w){
    const pc=$(`<div class="card"></div>`);
    pc.appendChild($(`<div class="row"><h3 style="font-size:15px">Prestige</h3>
      <div><b class="gold">${prestigeLabel(cur)}</b> <span class="muted small">${cur}/100</span></div></div>`));
-   pc.appendChild($(`<div class="row" style="margin-top:6px">
+   pc.appendChild($(`<div class="row statrow" style="margin-top:6px">
      <div class="stat"><div class="lbl">Universe</div><div style="font-weight:800;font-size:16px">${gRank}<span class="muted" style="font-size:12px">/${gl.length}</span></div></div>
      <div class="stat"><div class="lbl">${regionOf(t.region).name}</div><div style="font-weight:800;font-size:16px">${rRank}<span class="muted" style="font-size:12px">/${rg.length}</span></div></div>
      <div class="stat"><div class="lbl">Since last season</div><div style="font-weight:800;font-size:16px" class="${delta===null?'muted':delta>0?'res-w':delta<0?'res-l':'muted'}">${delta===null?"\u2014":(delta>0?"+":"")+delta}</div></div>
