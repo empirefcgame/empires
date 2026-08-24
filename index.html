@@ -4725,11 +4725,12 @@ function bbPlayGame(hi,ai){
  let hs=Math.round(101+(ho-70)*0.72-(ad-70)*0.45+3.0+rnd(-16,16));
  let as=Math.round(101+(ao-70)*0.72-(hd-70)*0.45+rnd(-16,16));
  hs=Math.max(70,hs);as=Math.max(70,as);
- while(hs===as){if(Math.random()<0.5)hs+=2;else as+=2;}   // overtime
+ let ot=false;
+ while(hs===as){ot=true;if(Math.random()<0.5)hs+=2;else as+=2;}   // overtime
  if(hs>as){h.w++;a.l++;}else{a.w++;h.l++;}
  h.pf+=hs;h.pa+=as;a.pf+=as;a.pa+=hs;
  bbBoxScore(h,hs);bbBoxScore(a,as);
- return{hi,ai,hs,as};
+ return{hi,ai,hs,as,ot};
 }
 function bbBoxScore(t,pts){
  const r=bbRoster(t);if(!r.length)return;
@@ -4748,7 +4749,17 @@ function bbBoxScore(t,pts){
 function bbTick(){
  const bb=G.bb;if(!bb||!bb.sched)return;
  const day=bb.sched[bb.day];if(!day)return;
- day.forEach(([h,a])=>bbPlayGame(h,a));
+ const mine=bb.userTeam;
+ bb.lastResult=null;
+ day.forEach(([h,a])=>{
+   const r=bbPlayGame(h,a);
+   // one game a week means the president's own result can be kept and shown on Club
+   if(mine!=null&&(h===mine||a===mine)){
+     const home=h===mine, opp=bbT(home?a:h);
+     bb.lastResult={md:G.matchday,home,opp:opp?bbTeamName(opp):"\u2014",
+       pf:home?r.hs:r.as,pa:home?r.as:r.hs};
+   }
+ });
  bb.day++;
 }
 
@@ -4917,6 +4928,7 @@ function bbEndSeason(){
  bbFranchisePrestige();
 
  bb.teams.forEach(t=>{t.w=0;t.l=0;t.pf=0;t.pa=0;});
+ bb.lastResult=null;                        // no stale scorecard into the new season
  bb.sched=bbBuildSchedule();bb.day=0;
  bb.season=G.season+1;
 }
@@ -5152,6 +5164,7 @@ function bbSellFranchise(){
  bbFillRosters(bbStandings().map(x=>x.id),true);
  G.bb.userTeam=null;G.bb.five=null;G.bb.coach=null;G.bb.barn=0;G.bb.renewals=[];
  G.bb.paid=null;G.bb.paidInfl=null;G.bb.titlesAtBuy=0;G.bb.finHistory=[];G.bb.draftPicks=[];
+ G.bb.lastResult=null;
  if(TAB==="hoops")TAB="office";
  toast(`Franchise sold for ${money(price)}.`);
  saveGame(true);render();
@@ -5354,50 +5367,9 @@ function bbCoachBoost(key){
 }
 
 
-/* ---- the Ingalls Cup bracket ----
-   Always on screen. Before the playoffs it shows the projection from today's table, so
-   a president can watch his seeding move all season instead of waiting for a result he
-   had no visibility on. Once the cup is played it shows what actually happened. */
-function bbBracketCard(){
- const bb=G.bb, live=bb.lastPlayoffs&&bb.lastPlayoffs.season===G.season;
- const mine=bbMine();
- const card=$(`<div class="card"></div>`);
- card.appendChild($(`<div class="row"><h3 style="font-size:15px">${BB_CUP}</h3>
-   <span class="small ${live?"gold":"muted"}">${live?`Season ${bb.lastPlayoffs.season}`:"Projected field"}</span></div>`));
- if(live){
-   card.appendChild($(`<div class="small muted" style="margin:4px 0 10px">${bb.lastPlayoffs.champ} took it.</div>`));
-   const byRound={};
-   (bb.lastPlayoffs.log||[]).forEach(l=>{(byRound[l.round]=byRound[l.round]||[]).push(l.line||l.text);});
-   BB_ROUNDS.forEach(rd=>{
-     if(!byRound[rd])return;
-     card.appendChild($(`<div class="lbl" style="margin:8px 0 4px">${rd}</div>`));
-     card.appendChild($(byRound[rd].map(t=>`<div class="small" style="padding:2px 0">${t}</div>`).join("")));
-   });
-   return card;
- }
- const field=bbCupField();
- const seeded=bbSeedOrder(field);
- const inCup=mine&&field.includes(mine.id);
- const left=Math.max(0,SEASON_LEN-G.matchday);
- card.appendChild($(`<div class="small muted" style="margin:4px 0 10px">Top ${BB_CUP_FIELD} of ${BB_TEAMS} qualify. ${left?`${left} matchday${left===1?"":"s"} left, so this is the ${BB_ROUNDS[0]} as it stands today.`:`This is the ${BB_ROUNDS[0]}.`}${mine?(inCup?` You are seeded ${field.indexOf(mine.id)+1}.`:" You are outside the cut."):""}</div>`));
- let rows="";
- for(let i=0;i<seeded.length;i+=2){
-   const h=seeded[i],a=seeded[i+1];
-   const th=bbT(h),ta=bbT(a);if(!th||!ta)continue;
-   const me=mine&&(h===mine.id||a===mine.id);
-   rows+=`<tr${me?' style="color:var(--honey);font-weight:700"':''}>
-     <td class="muted">${field.indexOf(h)+1}</td><td class="l">${bbTeamName(th)}</td>
-     <td class="muted r">${th.w}-${th.l}</td>
-     <td class="muted">v</td>
-     <td class="l">${bbTeamName(ta)}</td><td class="muted r">${ta.w}-${ta.l}</td>
-     <td class="muted">${field.indexOf(a)+1}</td></tr>`;
- }
- card.appendChild($(`<table><tbody>${rows}</tbody></table>`));
- const bubble=bbStandings()[BB_CUP_FIELD];
- if(bubble)card.appendChild($(`<div class="small muted" style="margin-top:6px">First out: ${bbTeamName(bubble)} (${bubble.w}-${bubble.l}).</div>`));
- return card;
-}
-
+/* The projected-bracket card lived here. It is gone: the gold cut line on the league
+   table says the same thing in one row, and the cup itself is now played round by round
+   on the season-over screen where it belongs. */
 /* ---- the league table ---- */
 function bbStandingsCard(open){
  const bb=G.bb;
@@ -5410,7 +5382,7 @@ function bbStandingsCard(open){
  // <tr> in that context, so $(`<tr>...`) returns null and appendChild(null) throws.
  const rows=bbStandings().map((t,i)=>{
    const diff=t.pf-t.pa, me=mine&&t.id===mine.id;
-   return `<tr${i===7?' style="border-bottom:2px solid var(--honey)"':''}>
+   return `<tr${i===BB_CUP_FIELD-1?' style="border-bottom:2px solid var(--honey)"':''}>
      <td class="muted">${i+1}</td>
      <td class="l"${me?' style="color:var(--honey);font-weight:700"':''}>${bbTeamName(t)}${t.titles?` <span class="gold small">\u2605${t.titles}</span>`:""}</td>
      <td class="r">${t.w}</td><td class="r">${t.l}</td>
@@ -7319,6 +7291,19 @@ function viewClub(w){
       <div class="small ${res}" style="font-weight:700">${tag}${last.pens?" ON PENALTIES":""}</div></div>`));
   }}
 
+ // The president's own basketball result for the week, sitting under the football
+ // scorelines so both codes read the same way on the same screen.
+ {const f=bbMine(),r=G.bb&&G.bb.lastResult;
+  if(f&&r&&r.md===G.matchday){
+    const res=r.pf>r.pa?"res-w":"res-l";
+    const std=bbStandings(),pos=std.findIndex(x=>x.id===f.id)+1;
+    w.appendChild($(`<div class="card center" style="border-color:#7be3a4">
+      <div class="lbl">${BB_LEAGUE} \u00B7 ${r.home?"Home":"Away"} vs ${r.opp}</div>
+      <div class="scoreline ${res}">${r.pf} \u2013 ${r.pa}</div>
+      <div class="small ${res}" style="font-weight:700">${r.pf>r.pa?"WON":"LOST"}</div>
+      <div class="small muted" style="margin-top:5px">${bbTeamName(f)} ${f.w}-${f.l} \u00B7 ${ordinal(pos)} of ${BB_TEAMS}${pos<=BB_CUP_FIELD?` \u00B7 in the ${BB_CUP} places`:` \u00B7 outside the ${BB_CUP} places`}</div></div>`));
+  }}
+
  const retirees=squadOf(t).filter(p=>p.age>=40);
  if(retirees.length)
    w.appendChild($(`<div class="card small"><span class="ret">R</span>
@@ -8153,10 +8138,7 @@ function viewHoops(w){
  /* ---- 2. advance the season from here ---- */
  w.appendChild(bbAdvanceCard());
 
- /* ---- 3. the cup picture, always visible ---- */
- w.appendChild(bbBracketCard());
-
- /* ---- 4. the table ---- */
+ /* ---- 3. the table, where the gold line is the cup cut ---- */
  w.appendChild(bbStandingsCard(true));
 
  /* ---- 5. anything waiting on a decision ---- */
