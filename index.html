@@ -219,8 +219,14 @@ const ri=(a,b)=>Math.floor(rnd(a,b+1));
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const pick=a=>a[ri(0,a.length-1)];
 const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=ri(0,i);[a[i],a[j]]=[a[j],a[i]]}return a};
+/* Once the economy inflates and basketball franchises enter at ten figures, "£2751M"
+   stops being a number anyone reads at a glance. Roll up to B and T at the thousand
+   mark, trimming trailing zeros so £2.000B prints as £2B. */
 const money=n=>{const s=n<0?'-':'';n=Math.abs(Math.round(n));
-  if(n>=1e6)return s+'£'+(n/1e6).toFixed(n>=1e7?0:1)+'M';
+  const trim=v=>String(v).replace(/\.0+$/,'').replace(/(\.\d*[1-9])0+$/,'$1');
+  if(n>=1e12)return s+'£'+trim((n/1e12).toFixed(3))+'T';
+  if(n>=1e9)return s+'£'+trim((n/1e9).toFixed(3))+'B';
+  if(n>=999500)return s+'£'+(n/1e6).toFixed(n>=1e7?0:1)+'M';   // 999999 must not print as £1000k
   if(n>=1e3)return s+'£'+Math.round(n/1e3)+'k';return s+'£'+n};
 
 /* ======================= INFLATION =======================
@@ -1266,6 +1272,7 @@ function hydrateLoadedG(){
    if(G.bb.lastRounds==null)G.bb.lastRounds=0;
    if(G.bb.lastTitle==null)G.bb.lastTitle=false;
    if(!Array.isArray(G.bb.draftPicks))G.bb.draftPicks=[];
+   if(!Array.isArray(G.bb.finHistory))G.bb.finHistory=[];
    // Franchise ids used to share football's 0-19 number space. Lift every stored id
    // into the basketball space, including the ones held on players, history and the
    // agent's open offers, or a loaded save points at the wrong sport.
@@ -2893,7 +2900,22 @@ const BADGES=[
  {id:"phoenix",name:"Phoenix",desc:"Fall to tier 3 and climb back to Conrad champions"},
  {id:"next_man_up",name:"Next Man Up",desc:"Win the very next match after a first-team player is called away by an off-field crisis"},
  {id:"clean_books",name:"Clean Books",desc:"Never go into the red across a 10-season span"},
- {id:"empire_fc",name:"Empire FC",desc:"Unlock 50 other badges",f:()=>Object.keys(G.badges||{}).length>=50}
+ {id:"empire_fc",name:"Empire FC",desc:"Unlock 50 other badges",f:()=>Object.keys(G.badges||{}).length>=50},
+ /* ---- the Prairie League ----
+    Literal names here, not template reads of BB_LEAGUE and BB_CUP. This array is
+    evaluated well before the basketball block, so referencing those consts threw a
+    temporal-dead-zone error and the whole script failed to boot. */
+ {id:"bb_owner",name:"Two Sports",desc:"Buy a Prairie League franchise"},
+ {id:"bb_champ",name:"Ingalls Cup",desc:"Win the Ingalls Cup"},
+ {id:"bb_backtoback",name:"Back to Back",desc:"Win the Ingalls Cup in consecutive seasons"},
+ {id:"bb_dynasty",name:"Prairie Dynasty",desc:"Win three Ingalls Cups"},
+ {id:"bb_mvp",name:"Most Valuable",desc:"Have a player of yours named Prairie League MVP"},
+ {id:"bb_60",name:"Sixty Wins",desc:"Win 60 games in a single regular season"},
+ {id:"bb_perfectstart",name:"Prairie Fire",desc:"Win 70 games in a single regular season"},
+ {id:"bb_taxman",name:"Whatever It Takes",desc:"Pay over \u00A3100M in luxury tax in one season"},
+ {id:"bb_double",name:"Both Codes",desc:"Win the Conrad Cup and the Ingalls Cup in the same season"},
+ {id:"bb_homegrown",name:"Raised on the Prairie",desc:"Win the Ingalls Cup with a player you drafted"},
+ {id:"bb_profit",name:"Washing Its Face",desc:"Finish a season with the franchise in profit"}
 ];
 const BADGE_BY_ID={};BADGES.forEach(b=>BADGE_BY_ID[b.id]=b);
 function awardBadge(id){
@@ -4464,8 +4486,7 @@ const BB_ID_BASE=1000000;
 const BB_TEAM_BASE=2000000;
 const BB_TEAMS=20, BB_ROSTER=10, BB_GAMES=82, BB_FA_MAX=40;
 const BB_LEAGUE="Prairie League", BB_CUP="Ingalls Cup";
-const BB_AWARDS={mvp:"Charles Ingalls Award",scoring:"Nellie Oleson Trophy",
-  def:"Isaiah Edwards Award",roy:"Albert Award",coach:"Miss Beadle Award"};
+const BB_AWARDS={mvp:"MVP"};   // one trophy, one award. Nothing else to remember.
 
 const BB_FRANCHISES=[
  {city:"Walnut Grove",nick:"Ingalls"},   {city:"Plum Creek",nick:"Half-Pints"},
@@ -4725,19 +4746,9 @@ function bbAwards(){
  const score=p=>{const s=per(p);return s.pts+s.reb*0.9+s.ast*1.1+winPct(bbT(p.team))*9;};
  const best=(arr,f)=>arr.slice().sort((a,b)=>f(b)-f(a))[0];
  const mvp=best(played,score);
- const scorer=best(played,p=>per(p).pts);
- const dpoy=best(played,p=>p.df+per(p).reb*1.4);
- const rooks=played.filter(p=>p.rookie);
- const roy=rooks.length?best(rooks,score):null;
  if(mvp)mvp.mvps++;
- // Miss Beadle goes to the franchise that most outran the talent on its roster, across
- // all twenty rather than the playoff eight, so a good year at a poor club can win it.
- const coach=G.bb.teams.slice().sort((a,b)=>
-   (winPct(b)-(bbTalent(b)-52)/34)-(winPct(a)-(bbTalent(a)-52)/34))[0];
  return{mvp:mvp&&mvp.name,mvpTeam:mvp&&bbTeamName(bbT(mvp.team)),
-   scoring:scorer&&scorer.name,scoringAvg:scorer&&Math.round(per(scorer).pts*10)/10,
-   def:dpoy&&dpoy.name,roy:roy&&roy.name,
-   coach:coach&&`${bbTeamName(coach)} (${coach.w}-${coach.l})`};
+   mvpId:mvp&&mvp.id,mvpTeamId:mvp&&mvp.team};
 }
 
 /* ---- season turnover ---- */
@@ -4747,8 +4758,8 @@ function bbEndSeason(){
  const{champ,log}=bbPlayPlayoffs();
  const aw=bbAwards();
  bb.history.push({season:G.season,champ:bbTeamName(champ),champId:champ.id,
-   record:`${champ.w}-${champ.l}`,mvp:aw.mvp||null,scoring:aw.scoring||null,
-   def:aw.def||null,roy:aw.roy||null,coach:aw.coach||null});
+   record:`${champ.w}-${champ.l}`,mvp:aw.mvp||null,mvpTeam:aw.mvpTeam||null,
+   mvpTeamId:aw.mvpTeamId==null?null:aw.mvpTeamId});
  if(bb.history.length>60)bb.history.shift();
  bb.lastPlayoffs={champ:bbTeamName(champ),log,awards:aw,season:G.season};
 
@@ -4834,7 +4845,7 @@ function bbSignDraftPick(pid){
  const p=bbP(pid);if(!p||p.team!=null)return toast("He has gone elsewhere.");
  if(!(G.bb.draftPicks||[]).includes(pid))return;
  if(f.roster.length>=BB_ROSTER)return toast("The roster is full. Release someone first.");
- p.wage=bbWage(p);p.years=ri(3,4);bbAssign(p,f.id);
+ p.wage=bbWage(p);p.years=ri(3,4);p.drafted=true;bbAssign(p,f.id);
  G.bb.draftPicks=G.bb.draftPicks.filter(x=>x!==pid);
  logAdd(`${p.name} signs his first ${BB_LEAGUE} deal at ${money(p.wage)}/yr.`);
  saveGame(true);render();
@@ -5005,6 +5016,7 @@ function bbBuyFranchise(idx){
  G.bb.userTeam=o.tid;G.bb.agentCycle=null;G.bb.agent=false;
  G.bb.five=null;G.bb.barn=0;G.bb.coach=null;G.bb.renewals=[];
  G.bb.paid=o.price;G.bb.paidInfl=inflIndex();G.bb.titlesAtBuy=f.titles||0;
+ G.bb.finHistory=[];G.bb.draftPicks=[];awardBadge("bb_owner");
  (G.news=G.news||[]).unshift({season:G.season,
    text:`${t.name} buy into the ${BB_LEAGUE}. The franchise plays on as ${bbTeamName(f)}.`});
  toast(`You own a ${BB_LEAGUE} franchise.`);
@@ -5030,7 +5042,7 @@ function bbSellFranchise(){
  // the next owner does not inherit whatever short roster you left behind
  bbFillRosters(bbStandings().map(x=>x.id),true);
  G.bb.userTeam=null;G.bb.five=null;G.bb.coach=null;G.bb.barn=0;G.bb.renewals=[];
- G.bb.paid=null;G.bb.paidInfl=null;G.bb.titlesAtBuy=0;
+ G.bb.paid=null;G.bb.paidInfl=null;G.bb.titlesAtBuy=0;G.bb.finHistory=[];G.bb.draftPicks=[];
  if(TAB==="hoops")TAB="office";
  toast(`Franchise sold for ${money(price)}.`);
  saveGame(true);render();
@@ -5164,6 +5176,12 @@ function bbSettleFinance(){
  t.budget+=fin.net;
  logAdd(`${BB_LEAGUE}: ${money(fin.income)} in, ${money(fin.costs)} out.`,fin.net);
  if(fin.tax>0)logAdd(`${BB_LEAGUE} luxury tax on a ${money(fin.payroll)} payroll.`,0);
+ // a running ledger so a president can see the trend, not just this year's snapshot
+ const f=bbMine();
+ (G.bb.finHistory=G.bb.finHistory||[]).push({season:G.season,net:fin.net,
+   income:fin.income,costs:fin.costs,tax:fin.tax,
+   record:f?`${f.w}-${f.l}`:"",title:!!G.bb.lastTitle});
+ if(G.bb.finHistory.length>40)G.bb.finHistory.shift();
 }
 
 /* ---- ownership hooks into the season turnover ---- */
@@ -5176,7 +5194,26 @@ function bbOwnerSeasonTick(){
    bb.lastRounds=bb.lastPlayoffs.log.filter(l=>l.text.startsWith(me+" beat")).length;
    bb.lastTitle=bb.lastPlayoffs.champ===me;
  }
- if(f)bbSettleFinance();
+ if(f){
+   const h=bb.history[bb.history.length-1];
+   if(f.w>=60)awardBadge("bb_60");
+   if(f.w>=70)awardBadge("bb_perfectstart");
+   if(h&&h.mvpTeamId===f.id)awardBadge("bb_mvp");
+   if(bb.lastTitle){
+     awardBadge("bb_champ");
+     if((f.titles||0)-(bb.titlesAtBuy||0)>=3)awardBadge("bb_dynasty");
+     const prev=bb.history[bb.history.length-2];
+     if(prev&&prev.champId===f.id)awardBadge("bb_backtoback");
+     if(bbRoster(f).some(p=>p.drafted))awardBadge("bb_homegrown");
+     // lastCont carries winnerId, not a name; matching on name would never have fired
+     if(G.lastCont&&G.lastCont.season===G.season&&G.lastCont.winnerId===G.userTeam)
+       awardBadge("bb_double");
+   }
+   const fin=bbFinance();
+   if(fin){if(fin.tax>=IN(100e6))awardBadge("bb_taxman");
+     if(fin.net>0)awardBadge("bb_profit");}
+   bbSettleFinance();
+ }
  // contracts run down, and your expiring men become decisions rather than departures
  bb.renewals=[];
  bb.players.forEach(p=>{
@@ -5212,62 +5249,92 @@ function bbCoachBoost(key){
 }
 
 
-/* The Prairie League standings card. Collapsed by default so it never crowds the
-   Office screen of a president who has no interest in basketball. */
-function bbLeagueCard(){
- const bb=G.bb;
- const last=bb.history.length?bb.history[bb.history.length-1]:null;
- const card=$(`<details class="card" style="padding:10px"></details>`);
- card.appendChild($(`<summary style="cursor:pointer;font-weight:700;font-size:15px">\uD83C\uDFC0 ${BB_LEAGUE} \u00B7 <span class="muted" style="font-weight:600;font-size:12px">${last?`${last.champ} hold the ${BB_CUP}`:"no champion yet"}</span></summary>`));
- card.appendChild($(`<div class="small muted" style="margin:8px 0">Twenty franchises, eighty-two games, then a knockout for the ${BB_CUP}. It runs on its own.</div>`));
+/* ---- the Ingalls Cup bracket ----
+   Always on screen. Before the playoffs it shows the projection from today's table, so
+   a president can watch his seeding move all season instead of waiting for a result he
+   had no visibility on. Once the cup is played it shows what actually happened. */
+function bbBracketCard(){
+ const bb=G.bb, live=bb.lastPlayoffs&&bb.lastPlayoffs.season===G.season;
+ const seeds=bbStandings().slice(0,8);
+ const card=$(`<div class="card"></div>`);
+ card.appendChild($(`<div class="row"><h3 style="font-size:15px">${BB_CUP}</h3>
+   <span class="small ${live?"gold":"muted"}">${live?`Season ${bb.lastPlayoffs.season}`:"Projected"}</span></div>`));
+ card.appendChild($(`<div class="small muted" style="margin:4px 0 10px">${live
+   ?`${bb.lastPlayoffs.champ} took it.`
+   :`Top eight qualify. This is how it stands if the season ended today, with ${Math.max(0,SEASON_LEN-G.matchday)} matchday${SEASON_LEN-G.matchday===1?"":"s"} left.`}</div>`));
 
- // One table, one string. $ parses through a div, and the HTML parser discards a bare
- // <tr> in that context, so $(`<tr>...`) returns null and appendChild(null) throws.
- // That threw inside viewOffice, which meant render() painted the header and never
- // attached the body or the nav: the blank Office tab. Every football table in this
- // file builds its rows into one template for the same reason.
- const rows=bbStandings().map((t,i)=>{
-   const diff=t.pf-t.pa;
-   return `<tr${i===7?' style="border-bottom:2px solid var(--honey)"':''}>
-     <td class="muted">${i+1}</td><td class="l">${bbTeamName(t)}${t.titles?` <span class="gold small">\u2605${t.titles}</span>`:""}</td>
-     <td class="r">${t.w}</td><td class="r">${t.l}</td>
-     <td class="r ${diff>0?"res-w":diff<0?"res-l":"muted"}">${diff>0?"+":""}${diff}</td></tr>`;
- }).join("");
- card.appendChild($(`<table><thead><tr><th>#</th><th class="l">Franchise</th><th class="r">W</th><th class="r">L</th><th class="r">DIFF</th></tr></thead><tbody>${rows}</tbody></table>`));
- card.appendChild($(`<div class="small muted" style="margin-top:6px">The line marks the eighth seed. Top eight make the knockout.</div>`));
-
- if(last){
-   card.appendChild($(`<div class="divider"></div>`));
-   card.appendChild($(`<div class="small" style="margin-bottom:4px"><b>Season ${last.season}</b></div>`));
-   const line=(l,v)=>`<div class="logline"><span class="muted">${l}</span><span class="gold">${v}</span></div>`;
-   card.appendChild($(
-     line(BB_CUP,`${last.champ} (${last.record})`)+
-     (last.mvp?line(BB_AWARDS.mvp,last.mvp):"")+
-     (last.scoring?line(BB_AWARDS.scoring,last.scoring):"")+
-     (last.def?line(BB_AWARDS.def,last.def):"")+
-     (last.roy?line(BB_AWARDS.roy,last.roy):"")+
-     (last.coach?line(BB_AWARDS.coach,last.coach):"")
-   ));
- }
-
- // all-time scoring, the founding twenty and whoever has passed them
- const lead=bb.players.slice().sort((a,b)=>(b.cpts+b.pts)-(a.cpts+a.pts)).slice(0,5);
- if(lead.length&&(lead[0].cpts+lead[0].pts)>0){
-   card.appendChild($(`<div class="divider"></div>`));
-   card.appendChild($(`<div class="small" style="margin-bottom:4px"><b>Active scoring leaders</b></div>`));
-   lead.forEach(p=>{
-     const tm=p.team!=null?bbTeamName(bbT(p.team)):"free agent";
-     card.appendChild($(`<div class="logline"><span>${p.name} <span class="muted small">${p.pos} \u00B7 ${p.age}y \u00B7 ${tm}</span></span><span class="gold">${p.cpts+p.pts}</span></div>`));
+ const mine=bbMine();
+ const nm=t=>`${bbTeamName(t)}${mine&&t.id===mine.id?' <span class="gold small">you</span>':""}`;
+ if(live){
+   const byRound={};
+   bb.lastPlayoffs.log.forEach(l=>{(byRound[l.round]=byRound[l.round]||[]).push(l.text);});
+   Object.keys(byRound).forEach(rd=>{
+     card.appendChild($(`<div class="lbl" style="margin:8px 0 4px">${rd}</div>`));
+     card.appendChild($(byRound[rd].map(t=>`<div class="small" style="padding:2px 0">${t}</div>`).join("")));
    });
+ }else{
+   const pairs=[[0,7],[3,4],[2,5],[1,6]];
+   card.appendChild($(pairs.map(([a,b])=>{
+     const x=seeds[a],y=seeds[b];
+     if(!x||!y)return "";
+     return `<div class="fixt"><span style="flex:1"><span class="muted">${a+1}</span> ${nm(x)}
+       <span class="muted small">${x.w}-${x.l}</span></span>
+       <span class="muted small">v</span>
+       <span style="flex:1;text-align:right">${nm(y)} <span class="muted">${b+1}</span>
+       <span class="muted small">${y.w}-${y.l}</span></span></div>`;
+   }).join("")));
+   const ninth=bbStandings()[8];
+   if(ninth)card.appendChild($(`<div class="small muted" style="margin-top:6px">First out: ${bbTeamName(ninth)} (${ninth.w}-${ninth.l}).</div>`));
  }
  return card;
 }
+
+/* ---- the league table ---- */
+function bbStandingsCard(open){
+ const bb=G.bb;
+ const last=bb.history.length?bb.history[bb.history.length-1]:null;
+ const mine=bbMine();
+ const card=$(`<details class="card" style="padding:12px"${open?" open":""}></details>`);
+ card.appendChild($(`<summary style="cursor:pointer;font-weight:700;font-size:15px">${BB_LEAGUE} table
+   <span class="muted" style="font-weight:600;font-size:12px">\u00B7 tap to ${open?"hide":"show"}</span></summary>`));
+ // One table, one string. $ parses through a div, and the HTML parser discards a bare
+ // <tr> in that context, so $(`<tr>...`) returns null and appendChild(null) throws.
+ const rows=bbStandings().map((t,i)=>{
+   const diff=t.pf-t.pa, me=mine&&t.id===mine.id;
+   return `<tr${i===7?' style="border-bottom:2px solid var(--honey)"':''}>
+     <td class="muted">${i+1}</td>
+     <td class="l"${me?' style="color:var(--honey);font-weight:700"':''}>${bbTeamName(t)}${t.titles?` <span class="gold small">\u2605${t.titles}</span>`:""}</td>
+     <td class="r">${t.w}</td><td class="r">${t.l}</td>
+     <td class="r ${diff>0?"res-w":diff<0?"res-l":"muted"}">${diff>0?"+":""}${diff}</td></tr>`;
+ }).join("");
+ card.appendChild($(`<table style="margin-top:8px"><thead><tr><th>#</th><th class="l">Franchise</th><th class="r">W</th><th class="r">L</th><th class="r">DIFF</th></tr></thead><tbody>${rows}</tbody></table>`));
+ card.appendChild($(`<div class="small muted" style="margin-top:6px">The gold line is the cut for the ${BB_CUP}. \u2605 counts titles won.</div>`));
+ if(last){
+   card.appendChild($(`<div class="divider"></div>`));
+   card.appendChild($(`<div class="logline"><span class="muted">Season ${last.season} champions</span><span class="gold">${last.champ} (${last.record})</span></div>`+
+     (last.mvp?`<div class="logline"><span class="muted">MVP</span><span class="gold">${last.mvp}${last.mvpTeam?` \u00B7 ${last.mvpTeam}`:""}</span></div>`:"")));
+ }
+ const lead=bb.players.slice().sort((a,b)=>(b.cpts+b.pts)-(a.cpts+a.pts)).slice(0,5);
+ if(lead.length&&(lead[0].cpts+lead[0].pts)>0){
+   card.appendChild($(`<div class="divider"></div>`));
+   card.appendChild($(`<div class="small" style="margin-bottom:4px"><b>Career scoring, active players</b></div>`));
+   card.appendChild($(lead.map(p=>{
+     const tm=p.team!=null?bbTeamName(bbT(p.team)):"free agent";
+     return `<div class="logline"><span>${p.name} <span class="muted small">${p.pos} \u00B7 ${p.age}y \u00B7 ${tm}</span></span><span class="gold">${p.cpts+p.pts}</span></div>`;
+   }).join("")));
+ }
+ return card;
+}
+/* kept for the Office card, which wants the table collapsed by default */
+function bbLeagueCard(){return bbStandingsCard(false);}
+
 function bbNewLeague(){
  const bb={season:G.season,day:0,nextPid:1,teams:[],players:[],fa:[],idx:new Map(),
    sched:null,history:[],lastPlayoffs:null,
    userTeam:null,agent:false,agentCycle:null,
    five:null,barn:0,coach:null,renewals:[],
-   paid:null,paidInfl:null,titlesAtBuy:0,lastRounds:0,lastTitle:false};
+   paid:null,paidInfl:null,titlesAtBuy:0,lastRounds:0,lastTitle:false,
+   draftPicks:[],finHistory:[]};
  G.bb=bb;
  BB_FRANCHISES.forEach((f,i)=>bb.teams.push({id:BB_TEAM_BASE+i,city:f.city,nick:f.nick,
    arena:Math.round(rnd(12000,20000)/500)*500,w:0,l:0,pf:0,pa:0,
@@ -7881,54 +7948,70 @@ function viewHoops(w){
  const f=bbMine();if(!f){TAB="office";return viewOffice(w);}
  const t=userTeamObj(),bb=G.bb;
  const pos=bbStandings().findIndex(x=>x.id===f.id)+1;
- const payroll=bbPayroll(f),ceil=bbCeiling(),tax=bbTaxOn(payroll);
+ const payroll=bbPayroll(f),ceil=bbCeiling(),tax=bbTaxOn(payroll),over=payroll-ceil;
+ const fin=bbFinance();
 
+ /* ---- 1. where you stand, and what it is costing ---- */
  const hd=$(`<div class="card"></div>`);
- hd.appendChild($(`<div class="row"><h3 style="font-size:16px">${bbTeamName(f)}</h3>
+ hd.appendChild($(`<div class="row"><h3 style="font-size:17px">${bbTeamName(f)}</h3>
    <span class="small muted">${BB_LEAGUE}</span></div>`));
- hd.appendChild($(`<div class="row statrow" style="margin-top:8px">
+ hd.appendChild($(`<div class="row statrow" style="margin-top:10px">
    <div class="stat"><div class="lbl">Record</div><div class="big">${f.w}-${f.l}</div></div>
-   <div class="stat"><div class="lbl">League</div><div class="big">${pos}<span class="muted" style="font-size:12px">/20</span></div></div>
+   <div class="stat"><div class="lbl">Table</div><div class="big">${pos}<span class="muted" style="font-size:12px">/20</span></div></div>
    <div class="stat"><div class="lbl">${BB_CUP}s</div><div class="big">${f.titles||0}</div></div>
-   <div class="stat"><div class="lbl">Arena</div><div class="big">${(f.arena/1000).toFixed(0)}k</div></div>
+   <div class="stat"><div class="lbl">This season</div><div class="big ${fin&&fin.net<0?"":"gold"}" style="${fin&&fin.net<0?"color:var(--loss)":""}">${fin?(fin.net>=0?"+":"")+money(fin.net):"\u2014"}</div></div>
  </div>`));
- hd.appendChild($(`<div class="divider"></div>`));
- const over=payroll-ceil;
- hd.appendChild($(`<div class="logline"><span class="muted">Payroll</span><span class="${over>0?"injtag":"gold"}">${money(payroll)}/yr</span></div>
-   <div class="logline"><span class="muted">Ceiling</span><span>${money(ceil)}/yr</span></div>
-   ${tax>0?`<div class="logline"><span class="muted">Luxury tax at this payroll</span><span class="injtag">${money(tax)}/yr</span></div>`:""}`));
- hd.appendChild($(`<div class="small muted" style="margin-top:6px">${over>0
-   ?`You are ${money(over)} over. Every pound above the ceiling is taxed, and the bill lands on the club budget at season's end.`
-   :`You are ${money(-over)} under the ceiling. No tax due.`}</div>`));
+ hd.appendChild($(`<div class="small muted" style="margin-top:8px">${
+   fin&&fin.net<0
+    ?`On today's roster this franchise loses ${money(-fin.net)} a season, taken out of the club budget.`
+    :`On today's roster this franchise clears ${money(fin?fin.net:0)} a season into the club budget.`}</div>`));
  w.appendChild(hd);
 
- // ---- renewals, window only ----
- if((bb.renewals||[]).length){
-   const rc=$(`<div class="card" style="border-color:var(--honey)"></div>`);
-   rc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">Expiring deals</h3>`));
-   rc.appendChild($(`<div class="small muted" style="margin-bottom:8px">Answer before the season starts or they walk.</div>`));
-   bb.renewals.forEach(r=>{
-     const p=bbP(r.pid);if(!p)return;
-     const box=$(`<div style="margin-bottom:8px;padding:8px;border:1px solid var(--line);border-radius:8px"></div>`);
+ /* ---- 2. advance the season from here ---- */
+ w.appendChild(bbAdvanceCard());
+
+ /* ---- 3. the cup picture, always visible ---- */
+ w.appendChild(bbBracketCard());
+
+ /* ---- 4. the table ---- */
+ w.appendChild(bbStandingsCard(true));
+
+ /* ---- 5. anything waiting on a decision ---- */
+ const picks=(bb.draftPicks||[]).map(bbP).filter(p=>p&&p.team==null);
+ const renew=(bb.renewals||[]).map(r=>({r,p:bbP(r.pid)})).filter(x=>x.p);
+ if(renew.length||(inWindow()&&picks.length)){
+   const todo=$(`<div class="card" style="border-color:var(--honey)"></div>`);
+   todo.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">Needs an answer</h3>`));
+   todo.appendChild($(`<div class="small muted" style="margin-bottom:10px">These lapse when the next season kicks off.</div>`));
+   renew.forEach(({r,p})=>{
+     const box=$(`<div style="margin-bottom:10px;padding:9px;border:1px solid var(--line);border-radius:8px"></div>`);
      box.appendChild($(`<div class="row"><b class="gold">${p.name}</b><span class="small muted">${p.pos} ${p.ovr} \u00B7 ${p.age}y</span></div>
-       <div class="small muted" style="margin-top:3px">He wants ${money(r.ask)}/yr.</div>`));
+       <div class="small muted" style="margin-top:3px">Contract up. He wants ${money(r.ask)}/yr to stay.</div>`));
      const row=$(`<div class="row" style="gap:6px;margin-top:8px"></div>`);
      [[1,"Match"],[1.25,"+25%"],[1.6,"+60%"]].forEach(([m,lab])=>{
        const off=Math.round(r.ask*m/50000)*50000;
-       const b=$(`<button class="btn sm ${m===1?"sec":""}" style="flex:1">${lab} \u00B7 ${money(off)}</button>`);
+       const b=$(`<button class="btn sm ${m===1?"sec":""}" style="flex:1">${lab}<br><span style="font-size:10px;font-weight:600">${Math.round(bbSignChance(p,off)*100)}% stays</span></button>`);
        b.onclick=()=>bbRenew(p.id,off);row.appendChild(b);
      });
      box.appendChild(row);
-     box.appendChild($(`<div class="small muted" style="margin-top:4px">Chance he stays: ${[1,1.25,1.6].map(m=>Math.round(bbSignChance(p,r.ask*m)*100)+"%").join(" \u00B7 ")}</div>`));
-     rc.appendChild(box);
+     todo.appendChild(box);
    });
-   w.appendChild(rc);
+   if(inWindow())picks.forEach(p=>{
+     const full=f.roster.length>=BB_ROSTER;
+     const r=$(`<div class="fixt"><span style="flex:1"><b class="gold">${p.name}</b>
+       <span class="small muted"> draft pick \u00B7 ${p.pos} ${p.ovr} \u00B7 ${p.age}y \u00B7 ${money(bbWage(p))}/yr</span></span></div>`);
+     const b=$(`<button class="btn tiny ${full?"sec":""}">Sign</button>`);
+     b.disabled=full;b.onclick=()=>bbSignDraftPick(p.id);
+     r.appendChild(b);todo.appendChild(r);
+   });
+   w.appendChild(todo);
  }
 
- // ---- roster and the starting five ----
+ /* ---- 6. the roster ---- */
  const rc=$(`<div class="card"></div>`);
- rc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">Roster</h3>`));
- rc.appendChild($(`<div class="small muted" style="margin-bottom:8px">Minutes follow this order. Tap a man to move him into or out of your five.${bb.five&&bb.five.length?"":" Nobody named, so the best five play."}</div>`));
+ rc.appendChild($(`<div class="row"><h3 style="font-size:15px">Roster</h3>
+   <span class="small muted">${f.roster.length}/${BB_ROSTER}</span></div>`));
+ rc.appendChild($(`<div class="small muted" style="margin:4px 0 8px">Minutes follow this order, so the top five play the most. Tap a name to move him in or out of your five.${bb.five&&bb.five.length?"":" Nothing named, so your best five start."}</div>`));
  const order=bbRoster(f);
  order.forEach((p,i)=>{
    const inFive=i<5;
@@ -7936,7 +8019,7 @@ function viewHoops(w){
    const cut=Math.round((p.wage||bbWage(p))*(1+Math.max(0,(p.years||1)-1)*0.45));
    const r=$(`<div class="fixt" style="cursor:pointer${inFive?";border-left:3px solid var(--honey);padding-left:7px":""}">
      <span style="flex:1"><b class="${inFive?"gold":""}">${p.name}</b>
-       <span class="small muted"> ${p.pos} ${p.ovr} \u00B7 ${p.age}y \u00B7 ${money(p.wage||bbWage(p))}/yr \u00B7 ${expiring?'<span class="injtag">expiring</span>':`${p.years}yr`}</span></span></div>`);
+       <span class="small muted"> ${p.pos} ${p.ovr} \u00B7 ${p.age}y \u00B7 ${money(p.wage||bbWage(p))}/yr \u00B7 ${expiring?'<span class="injtag">expiring</span>':`${p.years}yr left`}</span></span></div>`);
    r.onclick=()=>{
      const cur=(bb.five||order.slice(0,5).map(x=>x.id)).slice();
      const k=cur.indexOf(p.id);
@@ -7955,29 +8038,14 @@ function viewHoops(w){
  }
  w.appendChild(rc);
 
- // ---- market, pre-season only ----
+ /* ---- 7. the market, pre-season only ---- */
  if(inWindow()){
-   const picks=(bb.draftPicks||[]).map(bbP).filter(p=>p&&p.team==null);
-   if(picks.length){
-     const dc=$(`<div class="card" style="border-color:var(--honey)"></div>`);
-     dc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">Your draft picks</h3>`));
-     dc.appendChild($(`<div class="small muted" style="margin-bottom:8px">Yours to sign at first-deal money, or leave them and they go into the open pool when the season starts. The rating is what he is now, not what he becomes.</div>`));
-     picks.forEach(p=>{
-       const full=f.roster.length>=BB_ROSTER;
-       const r=$(`<div class="fixt"><span style="flex:1"><b class="gold">${p.name}</b>
-         <span class="small muted"> ${p.pos} ${p.ovr} \u00B7 ${p.age}y \u00B7 ${money(bbWage(p))}/yr</span></span></div>`);
-       const b=$(`<button class="btn tiny ${full?"sec":""}">Sign</button>`);
-       b.disabled=full;b.onclick=()=>bbSignDraftPick(p.id);
-       r.appendChild(b);dc.appendChild(r);
-     });
-     if(f.roster.length>=BB_ROSTER)dc.appendChild($(`<div class="small injtag">Roster is full at ${BB_ROSTER}. Cut someone to sign a pick.</div>`));
-     w.appendChild(dc);
-   }
+   const mk=$(`<details class="card" open></details>`);
+   mk.appendChild($(`<summary style="cursor:pointer;font-weight:700;font-size:15px">Market \u00B7 signings and trades</summary>`));
    const fa=bb.fa.map(bbP).filter(Boolean).sort((a,b)=>b.ovr-a.ovr).slice(0,8);
    if(fa.length){
-     const c=$(`<div class="card"></div>`);
-     c.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">Free agents</h3>`));
-     c.appendChild($(`<div class="small muted" style="margin-bottom:8px">Rival franchises are bidding too. Pay over the ask to be sure of him.</div>`));
+     mk.appendChild($(`<div class="lbl" style="margin:10px 0 4px">Free agents</div>
+       <div class="small muted" style="margin-bottom:8px">Rivals are bidding too. Pay over the asking wage to be sure of him.</div>`));
      fa.forEach(p=>{
        const ask=bbAsk(p),full=f.roster.length>=BB_ROSTER;
        const box=$(`<div style="margin-bottom:8px;padding:8px;border:1px solid var(--line);border-radius:8px${full?";opacity:.45":""}"></div>`);
@@ -7986,92 +8054,143 @@ function viewHoops(w){
        const row=$(`<div class="row" style="gap:6px;margin-top:8px"></div>`);
        [[1,"Ask"],[1.25,"+25%"],[1.6,"+60%"]].forEach(([m,lab])=>{
          const off=Math.round(ask*m/50000)*50000;
-         const b=$(`<button class="btn sm ${m===1?"sec":""}" style="flex:1">${lab} \u00B7 ${Math.round(bbSignChance(p,off)*100)}%</button>`);
-         b.disabled=full;
-         b.onclick=()=>bbSignFreeAgent(p.id,off);row.appendChild(b);
+         const b=$(`<button class="btn sm ${m===1?"sec":""}" style="flex:1">${lab}<br><span style="font-size:10px;font-weight:600">${Math.round(bbSignChance(p,off)*100)}% signs</span></button>`);
+         b.disabled=full;b.onclick=()=>bbSignFreeAgent(p.id,off);row.appendChild(b);
        });
-       box.appendChild(row);
-       c.appendChild(box);
+       box.appendChild(row);mk.appendChild(box);
      });
-     if(f.roster.length>=BB_ROSTER)c.appendChild($(`<div class="small injtag">Roster is full at ${BB_ROSTER}. Release someone to sign.</div>`));
-     w.appendChild(c);
+     if(f.roster.length>=BB_ROSTER)mk.appendChild($(`<div class="small injtag">Roster is full at ${BB_ROSTER}. Cut someone to sign.</div>`));
    }
-
-   // buy a contracted man outright
    const targets=bb.players.filter(p=>p.team!=null&&p.team!==f.id).sort((a,b)=>b.ovr-a.ovr).slice(0,10);
-   const bc=$(`<div class="card"></div>`);
-   bc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">Buy a contract</h3>`));
-   bc.appendChild($(`<div class="small muted" style="margin-bottom:8px">A one-off fee to the franchise, then his wage every year after. The best ten in the ${BB_LEAGUE}.</div>`));
+   mk.appendChild($(`<div class="lbl" style="margin:12px 0 4px">Buy a contract</div>
+     <div class="small muted" style="margin-bottom:8px">A one-off fee to his franchise, then his wage every year after. The ten best men in the ${BB_LEAGUE}.</div>`));
    targets.forEach(p=>{
-     const fee=bbFee(p),ok=t.budget>=fee&&f.roster.length<BB_ROSTER;
+     const fee=bbFee(p),okBuy=t.budget>=fee&&f.roster.length<BB_ROSTER;
      const r=$(`<div class="fixt"><span style="flex:1"><b>${p.name}</b>
-       <span class="small muted"> ${p.pos} ${p.ovr} \u00B7 ${p.age}y \u00B7 ${bbTeamName(bbT(p.team))}</span></span>
-       <span class="gold small" style="font-weight:700;margin-right:8px">${money(fee)} fee</span></div>`);
-     const b=$(`<button class="btn tiny ${ok?"":"sec"}">Buy</button>`);
-     b.disabled=!ok;b.onclick=()=>bbBuyPlayer(p.id);
-     r.appendChild(b);bc.appendChild(r);
+       <span class="small muted"> ${p.pos} ${p.ovr} \u00B7 ${p.age}y \u00B7 ${bbTeamName(bbT(p.team))}</span>
+       <span class="small muted"><br>${money(fee)} fee, then ${money(bbWage(p))}/yr</span></span></div>`);
+     const b=$(`<button class="btn tiny ${okBuy?"":"sec"}">Buy</button>`);
+     b.disabled=!okBuy;b.onclick=()=>bbBuyPlayer(p.id);
+     r.appendChild(b);mk.appendChild(r);
    });
-   w.appendChild(bc);
+   w.appendChild(mk);
  }
 
- // ---- coach ----
- const cc=$(`<div class="card"></div>`);
- cc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">Head coach</h3>`));
+ /* ---- 8. front office ---- */
+ const fo=$(`<details class="card"></details>`);
+ fo.appendChild($(`<summary style="cursor:pointer;font-weight:700;font-size:15px">Front office \u00B7 coach and facilities</summary>`));
+ fo.appendChild($(`<div class="lbl" style="margin:10px 0 4px">Head coach</div>`));
  if(bb.coach){
    const c=bb.coach,tr=BB_COACH_TRAITS[c.trait];
-   cc.appendChild($(`<div class="small"><b class="gold">${c.name}</b> \u00B7 ${BB_COACH_TIERS[c.tier].label} \u00B7 ${money(c.wage)}/yr</div>
+   fo.appendChild($(`<div class="small"><b class="gold">${c.name}</b> \u00B7 ${BB_COACH_TIERS[c.tier].label} \u00B7 ${money(c.wage)}/yr</div>
      <div class="small muted" style="margin-top:4px"><b class="gold">${tr.label}</b> \u00B7 ${tr.desc}</div>`));
    const b=$(`<button class="btn sm sec" style="margin-top:8px">Let him go \u00B7 ${money(c.wage)} severance</button>`);
-   b.onclick=bbFireCoach;cc.appendChild(b);
+   b.onclick=bbFireCoach;fo.appendChild(b);
  }else{
-   cc.appendChild($(`<div class="small muted" style="margin-bottom:8px">Nobody on the bench. A coach lifts the whole roster and brings a trait with him.</div>`));
+   fo.appendChild($(`<div class="small muted" style="margin-bottom:8px">Nobody on the bench. A coach lifts the whole roster and brings a trait with him.</div>`));
    [1,2,3].forEach(tier=>{
      const c=BB_COACH_TIERS[tier];
      const b=$(`<button class="btn sm sec" style="width:100%;margin-bottom:6px">${c.label} \u00B7 ${money(IN(c.wage))}/yr</button>`);
-     b.onclick=()=>bbHireCoach(tier);cc.appendChild(b);
+     b.onclick=()=>bbHireCoach(tier);fo.appendChild(b);
    });
  }
- w.appendChild(cc);
-
- // ---- training barn ----
- const tb=$(`<div class="card"></div>`);
- tb.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">Training barn \u00B7 level ${bb.barn||0}</h3>`));
- tb.appendChild($(`<div class="small muted" style="margin-bottom:8px">Raises how fast your under-25s improve. Upkeep ${money(IN(BB_BARN_UPKEEP[bb.barn||0]))}/yr at this level.</div>`));
+ fo.appendChild($(`<div class="lbl" style="margin:12px 0 4px">Training barn \u00B7 level ${bb.barn||0} of 3</div>
+   <div class="small muted" style="margin-bottom:8px">Raises how fast your under-25s improve. Costs ${money(IN(BB_BARN_UPKEEP[bb.barn||0]))}/yr to run at this level.</div>`));
  if((bb.barn||0)<3){
    const nxt=(bb.barn||0)+1,cost=IN(BB_BARN[nxt]);
-   const b=$(`<button class="btn sm ${t.budget>=cost?"":"sec"}">Build to level ${nxt} \u00B7 ${money(cost)} once</button>`);
-   b.disabled=t.budget<cost;b.onclick=bbBuildBarn;tb.appendChild(b);
- }else tb.appendChild($(`<div class="small gold">Fully built.</div>`));
- w.appendChild(tb);
+   const b=$(`<button class="btn sm ${t.budget>=cost?"":"sec"}">Build to level ${nxt} \u00B7 ${money(cost)}</button>`);
+   b.disabled=t.budget<cost;b.onclick=bbBuildBarn;fo.appendChild(b);
+ }else fo.appendChild($(`<div class="small gold">Fully built.</div>`));
+ w.appendChild(fo);
 
- // ---- the money ----
- const fin=bbFinance();
+ /* ---- 9. the money ---- */
  if(fin){
-   const mc=$(`<div class="card"></div>`);
-   mc.appendChild($(`<h3 style="font-size:15px;margin-bottom:6px">This season's reckoning</h3>`));
-   mc.appendChild($(`<div class="small muted" style="margin-bottom:6px">Every line below is one season.</div>`));
+   const mc=$(`<details class="card" open></details>`);
+   mc.appendChild($(`<summary style="cursor:pointer;font-weight:700;font-size:15px">The money</summary>`));
+   mc.appendChild($(`<div class="lbl" style="margin:10px 0 4px">Payroll against the tax line</div>`));
+   mc.appendChild($(`<div class="logline"><span class="muted">Wages you owe</span><span class="${over>0?"injtag":"gold"}">${money(payroll)}/yr</span></div>
+     <div class="logline"><span class="muted">Tax-free limit</span><span>${money(ceil)}/yr</span></div>
+     ${tax>0?`<div class="logline"><span class="muted">Luxury tax you will owe</span><span class="injtag">${money(tax)}/yr</span></div>`:""}`));
+   mc.appendChild($(`<div class="small muted" style="margin-top:6px">${over>0
+     ?`You are ${money(over)} above the tax-free limit. Every pound over it is taxed, and at this payroll that adds ${money(tax)} to the bill. The tax rises the further over you go.`
+     :`You are ${money(-over)} below the tax-free limit, so you owe no luxury tax. Go above it and every extra pound is taxed on top of the wage itself.`}</div>`));
+
+   mc.appendChild($(`<div class="divider"></div>`));
+   mc.appendChild($(`<div class="lbl" style="margin-bottom:4px">This season, if it ended now</div>`));
    const line=(l,v,cls)=>`<div class="logline"><span class="muted">${l}</span><span class="${cls||""}">${v}</span></div>`;
    mc.appendChild($(
-     line("Gate",money(fin.gate),"gold")+
+     line("Ticket sales",money(fin.gate),"gold")+
      line("Sponsorship",money(fin.sponsor),"gold")+
-     (fin.rounds?line("Knockout rounds won",money(fin.rounds),"gold"):"")+
-     (fin.title?line(BB_CUP,money(fin.title),"gold"):"")+
-     line("Payroll",money(-fin.payroll),"injtag")+
+     (fin.rounds?line(`${BB_CUP} rounds won`,money(fin.rounds),"gold"):"")+
+     (fin.title?line(`${BB_CUP} won`,money(fin.title),"gold"):"")+
+     line("Player wages",money(-fin.payroll),"injtag")+
      (fin.tax?line("Luxury tax",money(-fin.tax),"injtag"):"")+
-     line("Arena, travel, coach, barn",money(-fin.upkeep),"injtag")+
-     line("Net to the club budget",(fin.net>=0?"+":"")+money(fin.net),fin.net>=0?"gold":"injtag")
+     line("Arena, travel, coach, barn",money(-fin.upkeep),"injtag")
    ));
-   mc.appendChild($(`<div class="small muted" style="margin-top:6px">Settled at season's end, straight into the club budget. Bonuses shown are last season's.</div>`));
+   mc.appendChild($(`<div class="logline" style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px">
+     <span><b>Net to the club budget</b></span>
+     <span class="${fin.net>=0?"gold":"injtag"}" style="font-weight:700">${(fin.net>=0?"+":"")+money(fin.net)}</span></div>`));
+
+   const hist=(bb.finHistory||[]).slice(-8).reverse();
+   if(hist.length){
+     mc.appendChild($(`<div class="divider"></div>`));
+     mc.appendChild($(`<div class="lbl" style="margin-bottom:4px">Season by season</div>`));
+     const rows=hist.map(h=>`<tr>
+       <td class="l">S${h.season}${h.title?' <span class="gold">\u2605</span>':""}</td>
+       <td class="l muted">${h.record}</td>
+       <td class="r muted">${money(h.income)}</td>
+       <td class="r muted">${money(h.costs)}</td>
+       <td class="r ${h.net>=0?"res-w":"res-l"}">${(h.net>=0?"+":"")+money(h.net)}</td></tr>`).join("");
+     mc.appendChild($(`<table><thead><tr><th class="l">Season</th><th class="l">Rec</th><th class="r">In</th><th class="r">Out</th><th class="r">Net</th></tr></thead><tbody>${rows}</tbody></table>`));
+     const total=(bb.finHistory||[]).reduce((a,h)=>a+h.net,0);
+     mc.appendChild($(`<div class="logline" style="margin-top:6px"><span class="muted">Since you bought in, wages and tax alone</span>
+       <span class="${total>=0?"gold":"injtag"}">${(total>=0?"+":"")+money(total)}</span></div>
+       <div class="logline"><span class="muted">Paid for the franchise itself</span><span>${money(bb.paid||0)}</span></div>`));
+   }
    w.appendChild(mc);
  }
 
- // ---- history and the exit ----
- w.appendChild(bbLeagueCard());
- const sc=$(`<div class="card"></div>`);
- sc.appendChild($(`<div class="small muted" style="margin-bottom:8px">Selling returns about four fifths of what the franchise is worth today.</div>`));
- const sb=$(`<button class="btn sec">Sell the franchise \u00B7 ${money(bbSaleValue())} once</button>`);
- sb.onclick=()=>{if(confirm("Sell the franchise? The roster and its history go with it."))bbSellFranchise();};
+ /* ---- 10. the exit ---- */
+ const sc=$(`<details class="card"></details>`);
+ sc.appendChild($(`<summary style="cursor:pointer;font-weight:700;font-size:15px">Sell the franchise</summary>`));
+ sc.appendChild($(`<div class="small muted" style="margin:8px 0">You get back roughly four fifths of what you paid, adjusted for inflation, plus a premium for every ${BB_CUP} you won. The roster and its history go with it.</div>`));
+ const sb=$(`<button class="btn sec">Sell \u00B7 ${money(bbSaleValue())}</button>`);
+ sb.onclick=()=>{if(confirm(`Sell ${bbTeamName(f)} for ${money(bbSaleValue())}?`))bbSellFranchise();};
  sc.appendChild(sb);w.appendChild(sc);
+}
+
+/* The season advances from here as well as from Club, so a president running a
+   basketball season does not have to leave the tab to move the week on. The complex
+   season-end flow stays on Club and this hands off to it. */
+function bbAdvanceCard(){
+ const card=$(`<div class="card"></div>`);
+ const t=userTeamObj();
+ if(inWindow()){
+   card.appendChild($(`<div class="row"><div class="lbl">Pre-season</div>
+     <div class="small">Window day ${G.window.day} of 3</div></div>`));
+   const b=$(`<button class="btn" style="margin-top:8px;margin-bottom:0">${G.window.day>=3?"Close the window and start the season":"Advance to window day "+(G.window.day+1)}</button>`);
+   b.onclick=()=>advanceWindowDay();card.appendChild(b);
+ }else if(G.pendingCup){
+   const g=userCupTieAt(G.pendingCup);
+   const rn=g?g.round:cupLabel(t.region)+" round";
+   card.appendChild($(`<div class="row"><div class="lbl">${cupLabel(t.region)}</div>
+     <div class="small">${g&&T(g.opp)?`${g.home?"Home":"Away"} vs ${T(g.opp).name}`:"\u2014"}</div></div>`));
+   const b=$(`<button class="btn cup" style="margin-top:8px;margin-bottom:0">Play ${/^Group/.test(rn)?"":"the "}${rn}</button>`);
+   b.onclick=()=>{playPendingCupRound();render()};card.appendChild(b);
+ }else if(G.matchday<SEASON_LEN){
+   const chunk=G.bb.sched&&G.bb.sched[G.bb.day]?G.bb.sched[G.bb.day].length:0;
+   const nx=upcomingFixture();
+   card.appendChild($(`<div class="row"><div class="lbl">Next up</div>
+     <div class="small">${nx?`${nx.home?"Home":"Away"} vs ${nx.opp}`:"League bye"}</div></div>`));
+   card.appendChild($(`<div class="small muted" style="margin-top:4px">${chunk} ${BB_LEAGUE} game${chunk===1?"":"s"} play this week.</div>`));
+   const b=$(`<button class="btn league" style="margin-top:8px;margin-bottom:0">Play matchday ${G.matchday+1} of ${SEASON_LEN}</button>`);
+   b.onclick=()=>{playMatchday();render()};card.appendChild(b);
+ }else{
+   card.appendChild($(`<div class="small muted">The regular season is over. The ${BB_CUP} is decided when you close the football season.</div>`));
+   const b=$(`<button class="btn cont" style="margin-top:8px;margin-bottom:0">Go to the Club tab to finish the season</button>`);
+   b.onclick=()=>{TAB="club";render()};card.appendChild(b);
+ }
+ return card;
 }
 
 /* The Office card. Before ownership this is the whole basketball surface: hire the
@@ -8102,8 +8221,8 @@ function bbAgentCard(){
      const box=$(`<div style="margin-bottom:8px;padding:8px;border:1px solid var(--line);border-radius:8px"></div>`);
      box.appendChild($(`<div class="row"><b class="gold">${bbTeamName(fr)}</b><span class="small ${o.grade==="contender"?"gold":"muted"}">${o.grade}</span></div>
        <div class="small muted" style="margin-top:3px">${fr.titles||0} ${BB_CUP}${(fr.titles||0)===1?"":"s"} \u00B7 roster rating ${o.talent} \u00B7 ${(fr.arena/1000).toFixed(0)}k arena</div>
-       <div class="small muted" style="margin-top:3px">Payroll you inherit: ${money(o.payroll)}/yr against a ${money(bbCeiling())}/yr ceiling.</div>`));
-     const b=$(`<button class="btn sm ${can?"":"sec"}" style="margin-top:8px">Buy \u00B7 ${money(o.price)} once</button>`);
+       <div class="small muted" style="margin-top:3px">Wages you inherit: ${money(o.payroll)}/yr. Anything above ${money(bbCeiling())}/yr is taxed.</div>`));
+     const b=$(`<button class="btn sm ${can?"":"sec"}" style="margin-top:8px">Buy \u00B7 ${money(o.price)}</button>`);
      b.disabled=!can;b.onclick=()=>bbBuyFranchise(i);
      box.appendChild(b);
      if(!can)box.appendChild($(`<div class="small injtag" style="margin-top:4px">Short by ${money(o.price-t.budget)}.</div>`));
