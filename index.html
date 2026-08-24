@@ -1255,10 +1255,16 @@ function hydrateLoadedG(){
  if(G.liaison===undefined)G.liaison=false;
  // The Prairie League opens play in whatever season an older save is on. No synthetic
  // history is invented: the trophy case starts empty and builds forward from here.
+ // Wrapped so a basketball migration fault can never refuse to load a football career.
+ try{
  if(!G.bb){bbNewLeague();
    (G.news=G.news||[]).unshift({season:G.season,
      text:`The ${BB_LEAGUE} opens play. ${BB_TEAMS} franchises, three games a week, ${BB_GAMES} a season, and the ${BB_CUP} at the end of it.`});
- }else{G.bb.idx=new Map();G.bb.players.forEach(p=>G.bb.idx.set(p.id,p));
+ }else{
+   if(!Array.isArray(G.bb.teams))G.bb.teams=[];
+   if(!Array.isArray(G.bb.players))G.bb.players=[];
+   if(!Array.isArray(G.bb.history))G.bb.history=[];
+   G.bb.idx=new Map();G.bb.players.forEach(p=>G.bb.idx.set(p.id,p));
    // fields that arrived with ownership, absent from a Pass 1 save
    if(G.bb.userTeam===undefined)G.bb.userTeam=null;
    if(G.bb.agent===undefined)G.bb.agent=false;
@@ -1304,6 +1310,13 @@ function hydrateLoadedG(){
    }
    G.bb.players.forEach(p=>{if(p.wage==null)p.wage=bbWage(p);if(p.years==null)p.years=ri(1,4);});
    bbRepair();}
+ }catch(e){
+   try{console.error("bb hydrate",e);}catch(_){}
+   try{bbNewLeague();
+     (G.news=G.news||[]).unshift({season:G.season,
+       text:`The ${BB_LEAGUE} was rebuilt after a load error. Football is untouched.`});}
+   catch(_){G.bb=null;}
+ }
  if(G.liaisonCycle===undefined)G.liaisonCycle=null;
  if(!G.gbLog)G.gbLog=[];
  if(!G.badges)G.badges={};
@@ -7393,9 +7406,10 @@ function viewClub(w){
   }}
 
  // The president's own basketball week, three games under the football scoreline.
+ try{
  {const f=bbMine(),week=G.bb&&G.bb.lastWeek;
   if(f&&week&&week.length&&week[0].md===G.matchday){
-    const w=week.filter(x=>x.pf>x.pa).length,l=week.length-w;
+    const won=week.filter(x=>x.pf>x.pa).length,lost=week.length-won;
     const std=bbStandings(),pos=std.findIndex(x=>x.id===f.id)+1;
     const lines=week.map(r=>{
       const res=r.pf>r.pa?"res-w":"res-l";
@@ -7403,11 +7417,12 @@ function viewClub(w){
     }).join("");
     w.appendChild($(`<div class="card center" style="border-color:#7be3a4">
       <div class="lbl">${BB_LEAGUE} \u00b7 this week</div>
-      <div class="scoreline ${w>l?"res-w":w<l?"res-l":"res-d"}">${w}\u2013${l}</div>
+      <div class="scoreline ${won>lost?"res-w":won<lost?"res-l":"res-d"}">${won}\u2013${lost}</div>
       <div class="small muted" style="margin-top:2px">week record</div>
       ${lines}
       <div class="small muted" style="margin-top:6px">${bbTeamName(f)} ${f.w}-${f.l} \u00b7 ${ordinal(pos)} of ${BB_TEAMS}</div></div>`));
   }}
+ }catch(e){try{console.error("bb week card",e);}catch(_){}}
 
  // the button that moves the week on, directly under the scorelines
  clubActionBlock(w,t);
@@ -8522,7 +8537,10 @@ function viewOffice(w){
  // ---- The Prairie League ----
  // Read-only for now. The league runs whether or not the president cares, and this card
  // is where he watches it before he can afford to be part of it.
- if(G.bb&&G.bb.userTeam==null){w.appendChild(bbAgentCard());w.appendChild(bbLeagueCard());}
+ if(G.bb&&G.bb.userTeam==null){
+  try{w.appendChild(bbAgentCard());w.appendChild(bbLeagueCard());}
+  catch(e){try{console.error("bb office",e);}catch(_){}}
+ }
 
  // ---- Innovation Lab ----
  {
