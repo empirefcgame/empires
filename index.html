@@ -1080,6 +1080,22 @@ const COMPACT_ZERO_SET=new Set(COMPACT_ZERO);
    Only the player records are edited, and only by dropping keys, so a shallow copy of
    G with a freshly built players array is enough. Nothing below mutates anything it
    shares with G, so the shared nested references are safe to hand to stringify. */
+/* The frozen per-club scorer record keeps a row for every man who ever scored for the
+   club. Over thirty-odd seasons that is hundreds of rows a club and the largest single
+   growing structure in the save, while the screen only ever shows the top handful. Trim
+   to the leaders on the way out; the men who drop off had already stopped mattering. */
+const SCORERS_KEEP=30;
+function trimScorers(){
+ if(!G||!G.teams)return;
+ G.teams.forEach(t=>{
+   const sc=t.scorers;if(!sc)return;
+   const ids=Object.keys(sc);
+   if(ids.length<=SCORERS_KEEP)return;
+   ids.sort((a,b)=>(sc[b].goals||0)-(sc[a].goals||0));
+   const keep={};ids.slice(0,SCORERS_KEEP).forEach(id=>{keep[id]=sc[id];});
+   t.scorers=keep;
+ });
+}
 function serializeSave(){
  const g={};
  for(const k in G)g[k]=G[k];
@@ -1116,11 +1132,82 @@ function expandCompactSave(g){
  });
  return g;
 }
+/* ---- save compression ----
+   localStorage stores strings as UTF-16, so a two-and-a-half million character save is
+   five megabytes on disk, which is the whole quota in most browsers. A long career hit
+   that wall and the autosave started failing. LZW over the UTF-8 bytes takes the save
+   to about an eighth of its size, which buys centuries rather than seasons.
+
+   Codes stop below the surrogate range so the output is always a well-formed string
+   that localStorage will hand back byte for byte. Compression only switches on once a
+   plain write has actually failed, or once a compressed save has been loaded, so an
+   early career pays nothing for it. */
+const LZ_TAG="LZW1:", LZ_MAX=0xD800;
+/* Two million characters is four megabytes in UTF-16, comfortably clear of the five
+   megabyte quota but close enough to act on. Past that the save is packed on the way
+   out, so the wall is never reached rather than being hit and recovered from. A young
+   career stays on plain writes and pays nothing. */
+const LZ_THRESHOLD=2000000;
+let SAVE_PACKED=false;
+function lzPack(str){
+ const bytes=new TextEncoder().encode(str);
+ if(!bytes.length)return "";
+ const dict=new Map();let next=256,cur=bytes[0];const out=[];
+ for(let i=1;i<bytes.length;i++){
+   const b=bytes[i],key=cur*256+b,hit=dict.get(key);
+   if(hit!==undefined){cur=hit;continue;}
+   out.push(cur);
+   if(next<LZ_MAX)dict.set(key,next++);
+   cur=b;
+ }
+ out.push(cur);
+ let s="";
+ for(let i=0;i<out.length;i+=8192)s+=String.fromCharCode.apply(null,out.slice(i,i+8192));
+ return s;
+}
+function lzUnpack(str){
+ if(!str.length)return "";
+ const dict=[];for(let i=0;i<256;i++)dict.push([i]);
+ let next=256,prev=dict[str.charCodeAt(0)];
+ const out=Array.from(prev);
+ for(let i=1;i<str.length;i++){
+   const c=str.charCodeAt(i);let entry;
+   if(c<dict.length)entry=dict[c];
+   else if(c===next)entry=prev.concat(prev[0]);
+   else throw new Error("corrupt save stream");
+   for(let k=0;k<entry.length;k++)out.push(entry[k]);
+   if(next<LZ_MAX){dict.push(prev.concat(entry[0]));next++;}
+   prev=entry;
+ }
+ return new TextDecoder().decode(new Uint8Array(out));
+}
+function readStoredSave(){
+ const raw=localStorage.getItem(SAVE_KEY);
+ if(!raw)return null;
+ if(raw.slice(0,LZ_TAG.length)===LZ_TAG){
+   SAVE_PACKED=true;
+   return lzUnpack(raw.slice(LZ_TAG.length));
+ }
+ return raw;
+}
 function saveGame(silent){
- try{localStorage.setItem(SAVE_KEY,serializeSave());
+ const json=serializeSave();
+ const write=(packed)=>{
+   localStorage.setItem(SAVE_KEY,packed?LZ_TAG+lzPack(json):json);
    if(G)G.saveError=null;
-   if(!silent)toast("Game saved.");return true;}
+   if(!silent)toast("Game saved.");
+   return true;
+ };
+ try{return write(SAVE_PACKED||json.length>LZ_THRESHOLD);}
  catch(e){
+   // Out of room on a plain write: compress and try again, and stay compressed from
+   // here on so the next save does not repeat the failure.
+   if(!SAVE_PACKED){
+     try{const ok=write(true);SAVE_PACKED=true;
+       if(ok&&silent){try{toast("Storage was full. Save compressed and written.");}catch(_){}}
+       return ok;}
+     catch(e2){e=e2;}
+   }
    // A silent autosave that fails silently is the worst outcome available: the player
    // keeps playing for hours believing the career is being written down. Record it and
    // let the header show a standing warning until a save succeeds.
@@ -1225,7 +1312,7 @@ function loadGame(){
  // broken object, with no way back.
  const backup=G;
  try{
-   const raw=localStorage.getItem(SAVE_KEY);if(!raw)return false;
+   const raw=readStoredSave();if(!raw)return false;   // transparently unpacks LZW saves
    const g=expandCompactSave(JSON.parse(raw));
    validateSaveShape(g);
    G=g;hydrateLoadedG();
@@ -4957,6 +5044,7 @@ function bbEndSeason(){
  // back would hand him men he never signed and undo cuts he chose to make.
  bbFillRosters(order,false);
  bbFranchisePrestige();
+ trimScorers();          // keep the club goal records from growing without bound
 
  bb.teams.forEach(t=>{t.w=0;t.l=0;t.pf=0;t.pa=0;});
  bb.lastResult=null;                        // no stale scorecard into the new season
@@ -5912,8 +6000,11 @@ function runWorldCup(){
  });
  (squads[champ]||[]).forEach(id=>{const p=P(+id);if(p){p.wcWins=(p.wcWins||0)+1;}});
  if((squads[champ]||[]).map(id=>P(+id)).filter(p=>p&&p.team===G.userTeam).length>=5)awardBadge("nation_builder");
- G.cups.world.push({season:G.season,champion:champ,semifinalists:semi,finalists,
-   squads,gamesPlayed,log:log.slice(0,8)});
+ // The archive is read for season and champion only, but it was storing every squad
+ // and every game of every tournament ever played: 9.6k a season that never came back
+ // out. The full detail of the CURRENT tournament lives in G.lastWC, which is what the
+ // World Cup screen actually reads.
+ G.cups.world.push({season:G.season,champion:champ,semifinalists:semi,finalists});
  G.lastWC={season:G.season,champion:champ,semifinalists:semi,finalists,squads,gamesPlayed,log:log.slice(0,8)};
  logAdd(`\u2691 World Cup won by ${champ}! (Semifinalists: ${semi.join(", ")})`);
 }
