@@ -66,6 +66,10 @@
   /* The three competition buttons are full-width and always sit between cards, so they
      carry the same bottom gap a card does. The colour key that used to supply that gap
      under the league button is gone: the button now names the competition outright. */
+  /* A button dropped straight into the page flow is followed by a card, so it carries
+     the same bottom gap a card does. Buttons nested inside a card are exempt, which is
+     what the :scope > selector buys. */
+  .wrap > .btn{margin-bottom:12px}
   .btn.league{background:linear-gradient(180deg,#ffe27a,#e0b93a);color:#241a00;margin-bottom:12px}
   .btn.cup{background:linear-gradient(180deg,#ff8fc0,#d1447f);color:#3a0820;margin-bottom:12px}
   .btn.cont{background:linear-gradient(180deg,#7be3a4,#3fa96a);color:#062615;margin-bottom:12px}
@@ -1273,6 +1277,7 @@ function hydrateLoadedG(){
    if(G.bb.lastTitle==null)G.bb.lastTitle=false;
    if(!Array.isArray(G.bb.draftPicks))G.bb.draftPicks=[];
    if(!Array.isArray(G.bb.finHistory))G.bb.finHistory=[];
+   delete G.bb.weekResults;   // written by an earlier build, never read now
    // The league has changed shape more than once. Two jobs here: get the franchise
    // count to BB_TEAMS whichever direction it moved, and never silently delete a season
    // a president is halfway through. Records are kept; only the fixture list is rebuilt.
@@ -4764,12 +4769,11 @@ function bbTick(){
  const bb=G.bb;if(!bb||!bb.sched)return;
  const day=bb.sched[bb.day];if(!day)return;
  const mine=bb.userTeam;
- bb.lastResult=null;bb.weekResults=[];
+ // Only the president's own game is kept. Storing the whole night was dead weight in
+ // every save once the around-the-league card came out.
+ bb.lastResult=null;
  day.forEach(([h,a])=>{
    const r=bbPlayGame(h,a);
-   // The whole night is kept, not just the president's own game, so a week in the
-   // league reads like a week in a league rather than one fixture in a vacuum.
-   bb.weekResults.push([h,a,r.hs,r.as]);
    if(mine!=null&&(h===mine||a===mine)){
      const home=h===mine, opp=bbT(home?a:h);
      bb.lastResult={md:G.matchday,home,opp:opp?bbTeamName(opp):"\u2014",
@@ -4873,6 +4877,11 @@ function bbFinishCup(st){
      const pr=IN(BB_TITLE_BONUS);
      G.bb.cupPrize=(G.bb.cupPrize||0)+pr;
      logAdd(`${BB_CUP}: CHAMPIONS! ${money(pr)} to the season's books.`);
+     // Recorded against the football club, not the franchise, so the cabinet keeps it
+     // even after the franchise is sold. You won it; it does not leave with the asset.
+     const ut=userTeamObj();
+     if(ut){ut.bbTitles=(ut.bbTitles||0)+1;
+       (ut.bbTitleSeasons=ut.bbTitleSeasons||[]).push(G.season);}
    }
  }
  st.finished=true;
@@ -4950,7 +4959,7 @@ function bbEndSeason(){
  bbFranchisePrestige();
 
  bb.teams.forEach(t=>{t.w=0;t.l=0;t.pf=0;t.pa=0;});
- bb.lastResult=null;bb.weekResults=[];      // no stale scorecard into the new season
+ bb.lastResult=null;                        // no stale scorecard into the new season
  bb.sched=bbBuildSchedule();bb.day=0;
  bb.season=G.season+1;
 }
@@ -7236,8 +7245,12 @@ function trophyCard(t){
  row.appendChild(mkStat(cupName,t.cupTitles,cupSeasons));
  row.appendChild(mkStat(contName,t.contTitles,contSeasons));
  row.appendChild(mkStat(SUPER_CUP,t.superTitles,superSeasons));
+ // The basketball trophy only appears once the president has a stake in that league,
+ // so a five-across cabinet is not forced on anyone who never bought a franchise.
+ const ownsHoops=t.id===G.userTeam&&G.bb&&(G.bb.userTeam!=null||(t.bbTitles||0)>0);
+ if(ownsHoops)row.appendChild(mkStat(BB_CUP,t.bbTitles,t.bbTitleSeasons||[]));
  c.appendChild(row);c.appendChild(detail);
- if(!(t.leagueTitles||t.cupTitles||t.contTitles||t.superTitles))
+ if(!(t.leagueTitles||t.cupTitles||t.contTitles||t.superTitles||(ownsHoops&&t.bbTitles)))
    c.appendChild($(`<div class="small muted center" style="margin-top:6px">No silverware yet. Win a division, the cup, or the ${CONT_CUP} to fill the cabinet.</div>`));
  else
    c.appendChild($(`<div class="small muted center" style="margin-top:6px">Tap a trophy to see the winning seasons.</div>`));
@@ -7453,16 +7466,6 @@ function viewClub(w){
       <div class="scoreline ${res}">${r.pf} \u2013 ${r.pa}</div>
       <div class="small ${res}" style="font-weight:700">${r.pf>r.pa?"WON":"LOST"}</div>
       <div class="small muted" style="margin-top:5px">${bbTeamName(f)} ${f.w}-${f.l} \u00B7 ${ordinal(pos)} on the table</div></div>`));
-    const others=(G.bb.weekResults||[]).filter(x=>x[0]!==f.id&&x[1]!==f.id);
-    if(others.length){
-      const d=$(`<details class="card" style="padding:10px"></details>`);
-      d.appendChild($(`<summary style="cursor:pointer;font-size:12px;color:var(--muted);font-weight:600">Around the ${BB_LEAGUE} \u00B7 ${others.length} more</summary>`));
-      d.appendChild($(`<div style="margin-top:6px">`+others.map(x=>{
-        const th=bbT(x[0]),ta=bbT(x[1]);if(!th||!ta)return "";
-        return `<div class="small muted" style="padding:1px 0">${bbTeamName(th)} <b class="${x[2]>x[3]?"res-w":""}">${x[2]}</b>\u2013<b class="${x[3]>x[2]?"res-w":""}">${x[3]}</b> ${bbTeamName(ta)}</div>`;
-      }).join("")+`</div>`));
-      w.appendChild(d);
-    }
   }}
 
  // the button that moves the week on, directly under the scorelines
