@@ -1255,16 +1255,11 @@ function hydrateLoadedG(){
  if(G.liaison===undefined)G.liaison=false;
  // The Prairie League opens play in whatever season an older save is on. No synthetic
  // history is invented: the trophy case starts empty and builds forward from here.
- // Wrapped so a basketball migration fault can never refuse to load a football career.
- try{
  if(!G.bb){bbNewLeague();
    (G.news=G.news||[]).unshift({season:G.season,
-     text:`The ${BB_LEAGUE} opens play. ${BB_TEAMS} franchises, three games a week, ${BB_GAMES} a season, and the ${BB_CUP} at the end of it.`});
- }else{
-   if(!Array.isArray(G.bb.teams))G.bb.teams=[];
-   if(!Array.isArray(G.bb.players))G.bb.players=[];
-   if(!Array.isArray(G.bb.history))G.bb.history=[];
-   G.bb.idx=new Map();G.bb.players.forEach(p=>G.bb.idx.set(p.id,p));
+     text:`The ${BB_LEAGUE} opens play. ${BB_TEAMS} franchises, one game a week, and the ${BB_CUP} at the end of it.`});
+ }else{G.bb.idx=new Map();G.bb.players.forEach(p=>G.bb.idx.set(p.id,p));
+   if(!G.bb.sched){G.bb.sched=bbBuildSchedule();G.bb.day=0;}
    // fields that arrived with ownership, absent from a Pass 1 save
    if(G.bb.userTeam===undefined)G.bb.userTeam=null;
    if(G.bb.agent===undefined)G.bb.agent=false;
@@ -1278,45 +1273,61 @@ function hydrateLoadedG(){
    if(G.bb.lastTitle==null)G.bb.lastTitle=false;
    if(!Array.isArray(G.bb.draftPicks))G.bb.draftPicks=[];
    if(!Array.isArray(G.bb.finHistory))G.bb.finHistory=[];
-   if(!Array.isArray(G.bb.lastWeek))G.bb.lastWeek=[];
-   // Franchise ids used to share football's 0-19 number space. Lift every stored id
-   // into the basketball space, including the ones held on players, history and the
-   // agent's open offers, or a loaded save points at the wrong sport.
-   if(G.bb.teams.length&&G.bb.teams[0].id<BB_TEAM_BASE){
-     G.bb.teams.forEach((t,i)=>{t.id=BB_TEAM_BASE+i;});
-     G.bb.players.forEach(p=>{if(p.team!=null&&p.team<BB_TEAM_BASE)p.team+=BB_TEAM_BASE;});
-     if(G.bb.userTeam!=null&&G.bb.userTeam<BB_TEAM_BASE)G.bb.userTeam+=BB_TEAM_BASE;
-     G.bb.history.forEach(h=>{if(h.champId!=null&&h.champId<BB_TEAM_BASE)h.champId+=BB_TEAM_BASE;});
-     if(G.bb.agentCycle&&G.bb.agentCycle.offers)
-       G.bb.agentCycle.offers.forEach(o=>{if(o.tid<BB_TEAM_BASE)o.tid+=BB_TEAM_BASE;});
-   }
-   // The league is twenty franchises, 54 games, three a week. Anything else (the
-   // short 18-game season, the 32-team expansion) is reshaped here. Nobody had
-   // played the old calendar, so resetting the table is honest.
+   // The league has changed shape more than once. Two jobs here: get the franchise
+   // count to BB_TEAMS whichever direction it moved, and never silently delete a season
+   // a president is halfway through. Records are kept; only the fixture list is rebuilt.
    if(G.bb.teams.length>BB_TEAMS){
-     G.bb.teams.slice(BB_TEAMS).forEach(t=>{
-       (t.roster||[]).slice().forEach(id=>{const p=bbP(id);if(p)bbRelease(p);});
-     });
-     const keep=new Set(G.bb.teams.slice(0,BB_TEAMS).map(t=>t.id));
-     if(G.bb.userTeam!=null&&!keep.has(G.bb.userTeam))G.bb.userTeam=null;
+     const doomed=G.bb.teams.slice(BB_TEAMS);
+     if(G.bb.userTeam!=null&&doomed.some(t=>t.id===G.bb.userTeam)){
+       // his franchise is one of the ones going. Buy it back rather than vanish it.
+       const back=bbSaleValue()||G.bb.paid||0;
+       const ut=userTeamObj();if(ut)ut.budget+=back;
+       (G.news=G.news||[]).unshift({season:G.season,
+         text:`The ${BB_LEAGUE} contracted to ${BB_TEAMS} franchises. Yours was wound up and your stake of ${money(back)} returned.`});
+       G.bb.userTeam=null;G.bb.five=null;G.bb.coach=null;G.bb.barn=0;
+       G.bb.renewals=[];G.bb.draftPicks=[];G.bb.finHistory=[];
+       G.bb.paid=null;G.bb.paidInfl=null;G.bb.titlesAtBuy=0;
+       if(TAB==="hoops")TAB="office";
+     }
+     const gone=new Set(doomed.map(t=>t.id));
+     G.bb.players.slice().forEach(p=>{if(p.team!=null&&gone.has(p.team))bbRetire(p);});
      G.bb.teams=G.bb.teams.slice(0,BB_TEAMS);
-     if(G.bb.agentCycle&&G.bb.agentCycle.offers)
-       G.bb.agentCycle.offers=G.bb.agentCycle.offers.filter(o=>keep.has(o.tid));
+     G.bb.history.forEach(h=>{if(gone.has(h.champId))h.champId=null;});
+     G.bb.sched=null;
+     (G.news=G.news||[]).unshift({season:G.season,
+       text:`The ${BB_LEAGUE} reorganises to ${BB_TEAMS} franchises. The top ${BB_CUP_FIELD} now reach the ${BB_CUP}.`});
    }
-   if(!bbSchedOk()){
-     G.bb.sched=bbBuildSchedule();G.bb.day=0;
-     G.bb.teams.forEach(t=>{t.w=0;t.l=0;t.pf=0;t.pa=0;});
-     G.bb.lastWeek=[];G.bb.lastResult=null;
+   if(G.bb.teams.length<BB_TEAMS){
+     const before=G.bb.teams.length;
+     for(let i=before;i<BB_TEAMS;i++){
+       const fr=BB_FRANCHISES[i];
+       G.bb.teams.push({id:BB_TEAM_BASE+i,city:fr.city,nick:fr.nick,
+         arena:Math.round(rnd(12000,20000)/500)*500,w:0,l:0,pf:0,pa:0,
+         titles:0,titleSeasons:[],playoffs:0,prestige:Math.round(rnd(22,44)),roster:[]});
+     }
+     for(let i=before;i<BB_TEAMS;i++){
+       const t=G.bb.teams[i],want=BB_POS.slice();shuffle(want);
+       want.forEach(pos=>{const p=bbNewPlayer(ri(19,34),pos,rnd(46,84));
+         G.bb.players.push(p);G.bb.idx.set(p.id,p);bbAssign(p,t.id);});
+     }
+     G.bb.sched=null;
+     (G.news=G.news||[]).unshift({season:G.season,
+       text:`The ${BB_LEAGUE} expands to ${BB_TEAMS} franchises.`});
    }
+   // A schedule from an older shape is rebuilt, but the table stands. Zeroing W-L here
+   // meant a president in week eleven watched his season disappear on load.
+   const shapeOK=Array.isArray(G.bb.sched)&&G.bb.sched.length===SEASON_LEN
+     &&G.bb.sched[0]&&G.bb.sched[0].length===BB_TEAMS/2;
+   if(!shapeOK){
+     G.bb.sched=bbBuildSchedule();
+     G.bb.day=Math.min(Math.max(0,G.matchday||0),SEASON_LEN);
+     if(G.bb.day>0)(G.news=G.news||[]).unshift({season:G.season,
+       text:`The ${BB_LEAGUE} redrew its fixture list. Standings carry over; the remaining weeks are new.`});
+   }
+   // Wages and contract lengths arrived with ownership. A save written before that has
+   // neither, and a roster of undefined wages makes payroll and the luxury tax NaN.
    G.bb.players.forEach(p=>{if(p.wage==null)p.wage=bbWage(p);if(p.years==null)p.years=ri(1,4);});
    bbRepair();}
- }catch(e){
-   try{console.error("bb hydrate",e);}catch(_){}
-   try{bbNewLeague();
-     (G.news=G.news||[]).unshift({season:G.season,
-       text:`The ${BB_LEAGUE} was rebuilt after a load error. Football is untouched.`});}
-   catch(_){G.bb=null;}
- }
  if(G.liaisonCycle===undefined)G.liaisonCycle=null;
  if(!G.gbLog)G.gbLog=[];
  if(!G.badges)G.badges={};
@@ -2934,13 +2945,13 @@ const BADGES=[
     evaluated well before the basketball block, so referencing those consts threw a
     temporal-dead-zone error and the whole script failed to boot. */
  {id:"bb_owner",name:"Two Sports",desc:"Buy a Prairie League franchise"},
- {id:"bb_qual",name:"Made the Cut",desc:"Reach the Ingalls Cup as one of the top eight"},
+ {id:"bb_qual",name:"Made the Cut",desc:"Reach the Ingalls Cup as one of the top sixteen"},
  {id:"bb_champ",name:"Ingalls Cup",desc:"Win the Ingalls Cup"},
  {id:"bb_backtoback",name:"Back to Back",desc:"Win the Ingalls Cup in consecutive seasons"},
  {id:"bb_dynasty",name:"Prairie Dynasty",desc:"Win three Ingalls Cups"},
  {id:"bb_mvp",name:"Most Valuable",desc:"Have a player of yours named Prairie League MVP"},
- {id:"bb_60",name:"Forty Wins",desc:"Win 40 games in a single regular season"},
- {id:"bb_perfectstart",name:"Prairie Fire",desc:"Win 48 games in a single regular season"},
+ {id:"bb_60",name:"Fourteen Wins",desc:"Win 14 of 18 in a single regular season"},
+ {id:"bb_perfectstart",name:"Prairie Fire",desc:"Win 17 of 18 in a single regular season"},
  {id:"bb_taxman",name:"Whatever It Takes",desc:"Pay over \u00A3100M in luxury tax in one season"},
  {id:"bb_double",name:"Both Codes",desc:"Win the Conrad Cup and the Ingalls Cup in the same season"},
  {id:"bb_homegrown",name:"Raised on the Prairie",desc:"Win the Ingalls Cup with a player you drafted"},
@@ -4501,18 +4512,25 @@ function generateNarratives(RT,ureg,boot,promoted,relegated){
 
    Player ids are offset by BB_ID_BASE so that if any football code path ever reaches
    a basketball id by accident, P() returns undefined instead of the wrong man.
-   Franchise ids sit at BB_TEAM_BASE, so T() and bbT() cannot return each other's
-   objects.
 
-   Calendar: 54 games, three per football matchday, so a week is a card of three
-   scorelines. Top eight reach the Ingalls Cup. */
+   Pass 1 is the league running autonomously. There is no ownership, no purchase and
+   no agent yet: those arrive in Pass 2. What exists here is a league with a real
+   history accumulating season by season, so that a president who buys in later is
+   buying something with banners already on the wall. */
 
 const BB_ID_BASE=1000000;
+/* Franchise ids sat at 0-19, exactly where football club ids live, so one stray T(tid)
+   or bbT(G.userTeam) would have silently operated on the wrong sport. Same shape as the
+   double-sign bug. Both number spaces are now disjoint and every lookup rejects a
+   foreign id instead of returning the wrong object. */
 const BB_TEAM_BASE=2000000;
-const BB_TEAMS=20, BB_ROSTER=10, BB_PER_WEEK=3, BB_GAMES=SEASON_LEN*BB_PER_WEEK, BB_FA_MAX=40;
+const BB_TEAMS=20, BB_ROSTER=10, BB_GAMES=SEASON_LEN, BB_FA_MAX=40;
+/* One game a matchday for the president's own franchise, with the other nine of the
+   night reported alongside it. Twenty franchises and eight cup places, so finishing
+   ninth means watching, which is the point of a cut. */
 const BB_CUP_FIELD=8;
 const BB_ROUNDS=["Quarterfinal","Semifinal","Final"];
-const BB_PRIZE=[7e6,14e6,0];   // the final's purse is BB_TITLE_BONUS
+const BB_PRIZE=[6e6,14e6,0];       // the final's purse is BB_TITLE_BONUS
 const BB_LEAGUE="Prairie League", BB_CUP="Ingalls Cup";
 const BB_AWARDS={mvp:"MVP"};   // one trophy, one award. Nothing else to remember.
 
@@ -4526,7 +4544,16 @@ const BB_FRANCHISES=[
  {city:"De Smet",nick:"Manlys"},         {city:"Pepin",nick:"Hansons"},
  {city:"Independence",nick:"Edwards"},   {city:"Mansfield",nick:"Bakers"},
  {city:"New Ulm",nick:"Wilders"},        {city:"Brookings",nick:"Alberts"},
- {city:"Yankton",nick:"Aldens"},         {city:"Lake City",nick:"Carolines"}
+ {city:"Yankton",nick:"Aldens"},         {city:"Lake City",nick:"Carolines"},
+ /* Twelve reserves, defined but unused at BB_TEAMS=20. Same sourcing as the rest, so
+    the league can be widened later by changing one constant rather than inventing
+    names under time pressure. */
+ {city:"Malone",nick:"Farmboys"},        {city:"Spring Valley",nick:"Lauras"},
+ {city:"Verdigris",nick:"Carries"},      {city:"Rocky Ridge",nick:"Fiddlers"},
+ {city:"Sanborn",nick:"Nellies"},        {city:"Marshall",nick:"Harriets"},
+ {city:"Lamberton",nick:"Charlottes"},   {city:"Volga",nick:"Graces"},
+ {city:"Huron",nick:"Garlands"},         {city:"Fort Dodge",nick:"Hesters"},
+ {city:"Westville",nick:"Wagons"},       {city:"Big Woods",nick:"Bears"}
 ];
 
 /* The founding generation. Twenty named men, aged so they retire across the first
@@ -4652,16 +4679,10 @@ function bbRetire(p){
 }
 
 /* ---- schedule ----
-   Circle method: twenty franchises pair off into ten games, and rotating the ring
-   gives nineteen distinct rounds. Three of those rounds fire every football
-   matchday, 54 games a season. A team meets most rivals three times and a few
-   twice; the leftover pairings rotate with the season offset. Home is handed to
-   whichever of the pair has had fewer so far, which lands everyone on 27. */
-function bbSchedOk(){
- const s=G.bb&&G.bb.sched;
- return !!(s&&s.length===SEASON_LEN&&s[0]&&s[0].length===BB_PER_WEEK
-   &&s[0][0]&&s[0][0].length===BB_TEAMS/2);
-}
+   Circle method: thirty-two franchises pair off into sixteen games, and rotating the
+   ring gives thirty-one distinct rounds. The season takes eighteen of them, starting
+   from an offset that moves each year, so the thirteen rivals you miss are different
+   rivals next season. One round per football matchday, exactly. */
 function bbBuildSchedule(){
  const B=BB_TEAM_BASE,n=BB_TEAMS,half=n/2;
  const ring=[];for(let i=1;i<n;i++)ring.push(i);
@@ -4670,26 +4691,25 @@ function bbBuildSchedule(){
    const pairs=[[0,ring[0]]];
    for(let i=1;i<half;i++)pairs.push([ring[i],ring[n-1-i]]);
    rounds.push(pairs);
-   ring.unshift(ring.pop());
+   ring.unshift(ring.pop());          // rotate
  }
+ // Nineteen rounds exist for twenty clubs; the season plays eighteen of them, so each
+ // year you miss exactly one rival and it is a different rival next year.
  const off=((G.season||1)*7)%(n-1);
+ // Flipping home by round-and-slot parity looked balanced and was not: a club's slot
+ // moves as the ring rotates, and some ended up with eighteen road games. Hand home to
+ // whichever of the pair has had fewer so far, which lands everyone on nine or ten.
  const homeCount=new Array(n).fill(0);
- function place(a,b,d){
-   const aHome=homeCount[a]<homeCount[b]||(homeCount[a]===homeCount[b]&&((a+d)%2===0));
-   if(aHome){homeCount[a]++;return[B+a,B+b];}
-   homeCount[b]++;return[B+b,B+a];
+ const days=[];
+ for(let d=0;d<SEASON_LEN;d++){
+   const r=rounds[(off+d)%(n-1)];
+   days.push(r.map(([a,b])=>{
+     const aHome=homeCount[a]<homeCount[b]||(homeCount[a]===homeCount[b]&&((a+d)%2===0));
+     if(aHome){homeCount[a]++;return[B+a,B+b];}
+     homeCount[b]++;return[B+b,B+a];
+   }));
  }
- const weeks=[];
- let k=0;
- for(let w=0;w<SEASON_LEN;w++){
-   const week=[];
-   for(let g=0;g<BB_PER_WEEK;g++,k++){
-     const r=rounds[(off+k)%(n-1)];
-     week.push(r.map(([a,b])=>place(a,b,k)));
-   }
-   weeks.push(week);
- }
- return weeks;
+ return days;
 }
 
 /* ---- game simulation ---- */
@@ -4742,24 +4762,20 @@ function bbBoxScore(t,pts){
 /* ---- the weekly tick, called once per football matchday ---- */
 function bbTick(){
  const bb=G.bb;if(!bb||!bb.sched)return;
- const week=bb.sched[bb.day];if(!week)return;
+ const day=bb.sched[bb.day];if(!day)return;
  const mine=bb.userTeam;
- bb.lastWeek=[];
- bb.lastResult=null;
- week.forEach(round=>{
-   round.forEach(([h,a])=>{
-     const r=bbPlayGame(h,a);
-     if(mine!=null&&(h===mine||a===mine)){
-       const home=h===mine, opp=bbT(home?a:h);
-       bb.lastWeek.push({md:G.matchday,home,opp:opp?bbTeamName(opp):"\u2014",
-         pf:home?r.hs:r.as,pa:home?r.as:r.hs});
-     }
-   });
+ bb.lastResult=null;bb.weekResults=[];
+ day.forEach(([h,a])=>{
+   const r=bbPlayGame(h,a);
+   // The whole night is kept, not just the president's own game, so a week in the
+   // league reads like a week in a league rather than one fixture in a vacuum.
+   bb.weekResults.push([h,a,r.hs,r.as]);
+   if(mine!=null&&(h===mine||a===mine)){
+     const home=h===mine, opp=bbT(home?a:h);
+     bb.lastResult={md:G.matchday,home,opp:opp?bbTeamName(opp):"\u2014",
+       pf:home?r.hs:r.as,pa:home?r.as:r.hs};
+   }
  });
- if(bb.lastWeek.length){
-   const last=bb.lastWeek[bb.lastWeek.length-1];
-   bb.lastResult=last;
- }
  bb.day++;
 }
 
@@ -4775,11 +4791,14 @@ function bbStandings(){
    G.contLive field for field, bbPlayRound mirrors contPlayRound, and bbRunCup is the
    atomic fallback for a president who is not in it. */
 function bbCupField(){
- // Eight of twenty. Finish 9th and you watch it.
+ // Sixteen of thirty-two. Finish in the bottom half and you watch it.
  return bbStandings().slice(0,BB_CUP_FIELD).map(t=>t.id);
 }
 function bbSeedOrder(ids){
- // 1v8, 4v5, 2v7, 3v6: top two cannot meet until the final.
+ // 1v16, 8v9, 5v12, 4v13, 3v14, 6v11, 7v10, 2v15: the standard bracket, so the top
+ // seed cannot meet the second until the final and a good season is worth something.
+ // 1v8, 4v5 in the top half; 2v7, 3v6 in the bottom. The top two seeds cannot meet
+ // before the final, so a good regular season is worth something.
  const o=[0,7,3,4,1,6,2,5];
  return o.map(i=>ids[i]).filter(x=>x!=null);
 }
@@ -4800,7 +4819,7 @@ function bbStartCup(){
  const ids=bbCupField();
  const seedOf={};ids.forEach((id,i)=>{seedOf[id]=i;});
  const mine=G.bb.userTeam;
- G.bb.lastRounds=0;G.bb.lastTitle=false;
+ G.bb.lastRounds=0;G.bb.lastTitle=false;G.bb.cupPrize=0;
  G.bbLive={alive:bbSeedOrder(ids),round:0,log:[],seedOf,
    qualified:ids.includes(mine),userOut:!ids.includes(mine),finished:false,lastRound:null};
  ids.forEach(id=>{const t=bbT(id);if(t)t.playoffs=(t.playoffs||0)+1;});
@@ -4823,9 +4842,12 @@ function bbPlayRound(st){
    st.lastRound.lines.push({line,user:h===mine||a===mine,won:win===mine});
    if(h===mine||a===mine){
      if(win===mine){
+       // Booked to the season, not credited here. Paying at the tap and again in
+       // bbFinance meant a president who actually played the cup was paid twice.
        const pr=IN(BB_PRIZE[Math.min(st.round,BB_PRIZE.length-1)]);
-       if(pr>0&&userTeamObj()){userTeamObj().budget+=pr;logAdd(`${BB_CUP}: won a ${rn}.`,pr);}
+       G.bb.cupPrize=(G.bb.cupPrize||0)+pr;
        G.bb.lastRounds=(G.bb.lastRounds||0)+1;
+       logAdd(`${BB_CUP}: won a ${rn}. ${money(pr)} to the season's books.`);
      }else{st.userOut=true;logAdd(`${BB_CUP}: knocked out in the ${rn}.`);}
    }
  }
@@ -4847,9 +4869,10 @@ function bbFinishCup(st){
    G.bb.lastPlayoffs={champ:bbTeamName(champ),log:st.log.slice(),
      awards:aw,season:G.season};
    G.bb.lastTitle=(G.bb.userTeam!=null&&champ.id===G.bb.userTeam);
-   if(G.bb.lastTitle&&userTeamObj()){
-     const pr=IN(BB_TITLE_BONUS);userTeamObj().budget+=pr;
-     logAdd(`${BB_CUP}: CHAMPIONS!`,pr);
+   if(G.bb.lastTitle){
+     const pr=IN(BB_TITLE_BONUS);
+     G.bb.cupPrize=(G.bb.cupPrize||0)+pr;
+     logAdd(`${BB_CUP}: CHAMPIONS! ${money(pr)} to the season's books.`);
    }
  }
  st.finished=true;
@@ -4927,7 +4950,7 @@ function bbEndSeason(){
  bbFranchisePrestige();
 
  bb.teams.forEach(t=>{t.w=0;t.l=0;t.pf=0;t.pa=0;});
- bb.lastResult=null;bb.lastWeek=[];
+ bb.lastResult=null;bb.weekResults=[];      // no stale scorecard into the new season
  bb.sched=bbBuildSchedule();bb.day=0;
  bb.season=G.season+1;
 }
@@ -4951,13 +4974,14 @@ function bbDraft(order){
    for(const tid of picks){
      const t=bbT(tid);if(!t||t.roster.length>=BB_ROSTER)continue;
      const p=cls[n];if(!p)break;
-     // The president is never auto-assigned a prospect. Hold at most as many
-     // unsigned picks as he has holes, so a 6-man tanking roster is not handed
-     // the whole class.
+     // The president is never auto-assigned a prospect. The men his slots would have
+     // taken are held for him to sign on the Hoops tab during the window, so the draft
+     // is a decision he makes rather than a roster that fills itself.
+     // Held picks are capped at the holes actually on the roster. The roster does not
+     // grow until he signs, so an uncapped hold offered a tanking six-man side most of
+     // the class.
      if(tid===G.bb.userTeam){
-       const held=(G.bb.draftPicks||[]).length;
-       const holes=BB_ROSTER-t.roster.length-held;
-       if(holes>0&&p.team==null)G.bb.draftPicks.push(p.id);
+       if(p.team==null&&G.bb.draftPicks.length<BB_ROSTER-t.roster.length)G.bb.draftPicks.push(p.id);
      }
      else if(p.team==null)bbAssign(p,tid);
      n++;if(n>=cls.length)break;
@@ -5024,8 +5048,8 @@ const BB_AGENT_WAGE=40000;                 // £/wk, the Mercantile Agent
 const BB_PRICE={cellar:0.9e9,middling:1.7e9,contender:3.0e9};
 const BB_CEILING=62e6;                     // payroll ceiling, a wage figure
 const BB_TAX=[[20e6,1.5],[30e6,2.5],[Infinity,4]];
-const BB_ARENA_UPKEEP=11e6, BB_TICKET=200, BB_TRAVEL=6e6;   // 27 home dates a season
-const BB_TITLE_BONUS=38e6, BB_ROUND_BONUS=9e6, BB_SPONSOR=26e6;
+const BB_ARENA_UPKEEP=11e6, BB_TICKET=200, BB_TRAVEL=6e6;   // nine home dates a season
+const BB_TITLE_BONUS=38e6, BB_SPONSOR=26e6;
 const BB_BARN=[0,55e6,140e6,300e6];        // training barn levels
 const BB_BARN_UPKEEP=[0,7e6,16e6,32e6];
 const BB_COACH_TIERS=[null,
@@ -5167,7 +5191,7 @@ function bbSellFranchise(){
  bbFillRosters(bbStandings().map(x=>x.id),true);
  G.bb.userTeam=null;G.bb.five=null;G.bb.coach=null;G.bb.barn=0;G.bb.renewals=[];
  G.bb.paid=null;G.bb.paidInfl=null;G.bb.titlesAtBuy=0;G.bb.finHistory=[];G.bb.draftPicks=[];
- G.bb.lastResult=null;G.bb.lastWeek=[];
+ G.bb.lastResult=null;
  if(TAB==="hoops")TAB="office";
  toast(`Franchise sold for ${money(price)}.`);
  saveGame(true);render();
@@ -5282,16 +5306,17 @@ function bbFinance(){
  const t=userTeamObj();if(!t)return null;
  const gp=f.w+f.l,pct=gp?f.w/gp:0.5;
  const fill=clamp(0.46+pct*0.42+(f.prestige||0)/380,0.3,1);
- const gate=Math.round(f.arena*(BB_GAMES/2)*IN(BB_TICKET)*fill);
+ const gate=Math.round(f.arena*Math.floor(SEASON_LEN/2)*IN(BB_TICKET)*fill);
  const sponsor=Math.round(IN(BB_SPONSOR)*(0.45+(f.prestige||0)/100));
  const payroll=bbPayroll(f);
  const tax=bbTaxOn(payroll);
  const coach=G.bb.coach?G.bb.coach.wage:0;
  const barn=IN(BB_BARN_UPKEEP[G.bb.barn||0]);
  const upkeep=IN(BB_ARENA_UPKEEP)+IN(BB_TRAVEL)+coach+barn;
- // Cup purses post when the ties are played. The annual books must not add them again.
- const rounds=0,title=0;
- const income=gate+sponsor+rounds+title;
+ // Cup money is accumulated once, as the rounds are played, and spent once, here.
+ const rounds=G.bb.cupPrize||0;
+ const title=0;
+ const income=gate+sponsor+rounds;
  const costs=payroll+tax+upkeep;
  return{gate,sponsor,rounds,title,income,payroll,tax,upkeep,coach,barn,costs,net:income-costs};
 }
@@ -5317,8 +5342,9 @@ function bbOwnerSeasonTick(){
  const f=bbMine();
  if(f){
    const h=bb.history[bb.history.length-1];
-   if(f.w>=40)awardBadge("bb_60");
-   if(f.w>=48)awardBadge("bb_perfectstart");
+   // 60 and 70 were 82-game numbers and could never fire in an 18-game league
+   if(f.w>=14)awardBadge("bb_60");
+   if(f.w>=17)awardBadge("bb_perfectstart");
    if(h&&h.mvpTeamId===f.id)awardBadge("bb_mvp");
    if(bb.lastTitle){
      awardBadge("bb_champ");
@@ -5414,13 +5440,14 @@ function bbLeagueCard(){return bbStandingsCard(false);}
 
 function bbNewLeague(){
  const bb={season:G.season,day:0,nextPid:1,teams:[],players:[],fa:[],idx:new Map(),
-   sched:null,history:[],lastPlayoffs:null,lastWeek:[],
+   sched:null,history:[],lastPlayoffs:null,
    userTeam:null,agent:false,agentCycle:null,
    five:null,barn:0,coach:null,renewals:[],
    paid:null,paidInfl:null,titlesAtBuy:0,lastRounds:0,lastTitle:false,
    draftPicks:[],finHistory:[]};
  G.bb=bb;
- BB_FRANCHISES.forEach((f,i)=>bb.teams.push({id:BB_TEAM_BASE+i,city:f.city,nick:f.nick,
+ // slice, not forEach: BB_FRANCHISES carries reserve names beyond BB_TEAMS
+ BB_FRANCHISES.slice(0,BB_TEAMS).forEach((f,i)=>bb.teams.push({id:BB_TEAM_BASE+i,city:f.city,nick:f.nick,
    arena:Math.round(rnd(12000,20000)/500)*500,w:0,l:0,pf:0,pa:0,
    titles:0,titleSeasons:[],playoffs:0,prestige:Math.round(rnd(22,44)),roster:[]}));
  // the founding twenty, one to a franchise
@@ -6721,6 +6748,18 @@ function acceptOffer(o){
 }
 function rejectOffer(o){G.offers=G.offers.filter(x=>x!==o);render();}
 function advanceWindowDay(){
+ // A six-man basketball roster is legal and will get him hammered for eighteen weeks.
+ // Say so out loud before the window shuts rather than letting it happen quietly. A
+ // second tap goes through, so it is a warning and not a wall.
+ if(G.window.day>=3){
+   const bf=bbMine();
+   if(bf&&bf.roster.length<8&&!G._thinRosterOK){
+     G._thinRosterOK=true;
+     toast(`${bbTeamName(bf)} have only ${bf.roster.length} players. Sign more in Hoops, or advance again to start anyway.`);
+     saveGame(true);render();return;
+   }
+   delete G._thinRosterOK;
+ }
  if(G.window.day>=3){G.window.day=4;toast("Transfer Window closed. Season begins.");}
  else{G.window.day++;genOffers();
    toast(`Transfer Window \u2014 Day ${G.window.day}.`);}
@@ -7113,24 +7152,22 @@ function presidencyCard(){
  card.appendChild($(`<div class="small" style="margin-bottom:6px"><b>Take charge elsewhere</b></div>`));
  card.appendChild($(`<div class="small muted" style="margin-bottom:8px">Leaving is permanent. Squad, money and staff stay behind.<br>
    ${userTeamObj().name} is prestige <b class="gold">${ceil}</b>. Clubs above that will not have you.</div>`));
- const regSel=$(`<select style="width:100%;margin-bottom:6px">${
-   REGIONS.map(r=>`<option value="${r.key}"${r.key===userRegionKey()?" selected":""}>${r.name}</option>`).join("")
- }</select>`);
+ const regSel=$(`<select style="width:100%;margin-bottom:6px"></select>`);
+ REGIONS.forEach(r=>regSel.appendChild($(`<option value="${r.key}"${r.key===userRegionKey()?" selected":""}>${r.name}</option>`)));
  const clubSel=$(`<select style="width:100%;margin-bottom:8px"></select>`);
  const note=$(`<div class="small muted" style="margin-bottom:8px"></div>`);
  const btn=$(`<button class="btn sec">Resign and take the job</button>`);
  let armed=false;
  const fill=()=>{
+   clubSel.innerHTML="";
    const rk=regSel.value;
    let open=0,blocked=0;
-   const opts=[];
    [0,1,2].forEach(tier=>tierClubs(rk,tier).forEach(id=>{
      const t=T(id);if(!t||id===G.userTeam)return;
      if(!clubWillHaveYou(t)){blocked++;return;}
      open++;
-     opts.push(`<option value="${id}">${t.name} \u00B7 ${tierName(rk,tier)} \u00B7 prestige ${Math.round(t.prestige||0)}</option>`);
+     clubSel.appendChild($(`<option value="${id}">${t.name} \u00B7 ${tierName(rk,tier)} \u00B7 prestige ${Math.round(t.prestige||0)}</option>`));
    }));
-   clubSel.innerHTML=opts.join("");
    const none=open===0;
    clubSel.style.display=none?"none":"";
    note.innerHTML=none
@@ -7405,24 +7442,28 @@ function viewClub(w){
       <div class="small ${res}" style="font-weight:700">${tag}${last.pens?" ON PENALTIES":""}</div></div>`));
   }}
 
- // The president's own basketball week, three games under the football scoreline.
- try{
- {const f=bbMine(),week=G.bb&&G.bb.lastWeek;
-  if(f&&week&&week.length&&week[0].md===G.matchday){
-    const won=week.filter(x=>x.pf>x.pa).length,lost=week.length-won;
+ // The president's own basketball result for the week, sitting under the football
+ // scorelines so both codes read the same way on the same screen.
+ {const f=bbMine(),r=G.bb&&G.bb.lastResult;
+  if(f&&r&&r.md===G.matchday){
+    const res=r.pf>r.pa?"res-w":"res-l";
     const std=bbStandings(),pos=std.findIndex(x=>x.id===f.id)+1;
-    const lines=week.map(r=>{
-      const res=r.pf>r.pa?"res-w":"res-l";
-      return `<div class="small ${res}" style="font-weight:700;margin-top:3px">${r.home?"":"@ "}${r.opp} \u00b7 ${r.pf}\u2013${r.pa}</div>`;
-    }).join("");
     w.appendChild($(`<div class="card center" style="border-color:#7be3a4">
-      <div class="lbl">${BB_LEAGUE} \u00b7 this week</div>
-      <div class="scoreline ${won>lost?"res-w":won<lost?"res-l":"res-d"}">${won}\u2013${lost}</div>
-      <div class="small muted" style="margin-top:2px">week record</div>
-      ${lines}
-      <div class="small muted" style="margin-top:6px">${bbTeamName(f)} ${f.w}-${f.l} \u00b7 ${ordinal(pos)} of ${BB_TEAMS}</div></div>`));
+      <div class="lbl">${BB_LEAGUE} \u00B7 ${r.home?"Home":"Away"} vs ${r.opp}</div>
+      <div class="scoreline ${res}">${r.pf} \u2013 ${r.pa}</div>
+      <div class="small ${res}" style="font-weight:700">${r.pf>r.pa?"WON":"LOST"}</div>
+      <div class="small muted" style="margin-top:5px">${bbTeamName(f)} ${f.w}-${f.l} \u00B7 ${ordinal(pos)} on the table</div></div>`));
+    const others=(G.bb.weekResults||[]).filter(x=>x[0]!==f.id&&x[1]!==f.id);
+    if(others.length){
+      const d=$(`<details class="card" style="padding:10px"></details>`);
+      d.appendChild($(`<summary style="cursor:pointer;font-size:12px;color:var(--muted);font-weight:600">Around the ${BB_LEAGUE} \u00B7 ${others.length} more</summary>`));
+      d.appendChild($(`<div style="margin-top:6px">`+others.map(x=>{
+        const th=bbT(x[0]),ta=bbT(x[1]);if(!th||!ta)return "";
+        return `<div class="small muted" style="padding:1px 0">${bbTeamName(th)} <b class="${x[2]>x[3]?"res-w":""}">${x[2]}</b>\u2013<b class="${x[3]>x[2]?"res-w":""}">${x[3]}</b> ${bbTeamName(ta)}</div>`;
+      }).join("")+`</div>`));
+      w.appendChild(d);
+    }
   }}
- }catch(e){try{console.error("bb week card",e);}catch(_){}}
 
  // the button that moves the week on, directly under the scorelines
  clubActionBlock(w,t);
@@ -7561,7 +7602,7 @@ function hoopsPhase(w,advance){
    if(inCup){
      w.appendChild($(`<div class="card center" style="border-color:var(--honey)">
        <b class="gold">${bbTeamName(f)} are in the ${BB_CUP}!</b>
-       <div class="small muted" style="margin-top:4px">Finished ${ordinal(pos)} of ${BB_TEAMS} at ${f.w}-${f.l}, seeded ${field.indexOf(mine)+1}. Eight franchises, three knockout rounds.</div></div>`));
+       <div class="small muted" style="margin-top:4px">Finished ${ordinal(pos)} of ${BB_TEAMS} at ${f.w}-${f.l}, seeded ${field.indexOf(mine)+1}. Sixteen franchises, four knockout rounds.</div></div>`));
      const b=$(`<button class="btn cont">Go to the ${BB_CUP} draw</button>`);
      b.onclick=()=>{bbStartCup();render()};
      w.appendChild(b);
@@ -8146,7 +8187,7 @@ function viewHoops(w){
    <span class="small muted">${BB_LEAGUE}</span></div>`));
  hd.appendChild($(`<div class="row statrow" style="margin-top:10px">
    <div class="stat"><div class="lbl">Record</div><div class="big">${f.w}-${f.l}</div></div>
-   <div class="stat"><div class="lbl">Table</div><div class="big">${pos}<span class="muted" style="font-size:12px">/20</span></div></div>
+   <div class="stat"><div class="lbl">Table</div><div class="big">${pos}<span class="muted" style="font-size:12px">/${BB_TEAMS}</span></div></div>
    <div class="stat"><div class="lbl">${BB_CUP}s</div><div class="big">${f.titles||0}</div></div>
    <div class="stat"><div class="lbl">This season</div><div class="big ${fin&&fin.net<0?"":"gold"}" style="${fin&&fin.net<0?"color:var(--loss)":""}">${fin?(fin.net>=0?"+":"")+money(fin.net):"\u2014"}</div></div>
  </div>`));
@@ -8184,8 +8225,13 @@ function viewHoops(w){
    });
    if(inWindow())picks.forEach(p=>{
      const full=f.roster.length>=BB_ROSTER;
+     // Raw prospects all look alike at eighteen. A coarse ceiling band is the difference
+     // between picking a name off a list and actually making a judgement.
+     const band=p.pot>=84?["Star potential","gold"]:p.pot>=72?["Could start","gold"]:
+                p.pot>=62?["Squad player","muted"]:["Project","muted"];
      const r=$(`<div class="fixt"><span style="flex:1"><b class="gold">${p.name}</b>
-       <span class="small muted"> draft pick \u00b7 ${p.pos} ${p.ovr} \u2192 ${p.pot} \u00b7 ${p.age}y \u00b7 ${money(bbWage(p))}/yr</span></span></div>`);
+       <span class="small muted"> draft pick \u00B7 ${p.pos} ${p.ovr} now \u00B7 ${p.age}y \u00B7 ${money(bbWage(p))}/yr</span>
+       <span class="small ${band[1]}"><br>${band[0]}</span></span></div>`);
      const b=$(`<button class="btn tiny ${full?"sec":""}">Sign</button>`);
      b.disabled=full;b.onclick=()=>bbSignDraftPick(p.id);
      r.appendChild(b);todo.appendChild(r);
@@ -8247,9 +8293,12 @@ function viewHoops(w){
      });
      if(f.roster.length>=BB_ROSTER)mk.appendChild($(`<div class="small injtag">Roster is full at ${BB_ROSTER}. Cut someone to sign.</div>`));
    }
-   const targets=bb.players.filter(p=>p.team!=null&&p.team!==f.id).sort((a,b)=>b.ovr-a.ovr).slice(0,10);
+   // Men with two years or less left. The very best in the league are usually locked
+   // into long deals, so this turns over every window instead of showing the same ten.
+   const targets=bb.players.filter(p=>p.team!=null&&p.team!==f.id&&(p.years||0)<=2)
+     .sort((a,b)=>b.ovr-a.ovr).slice(0,10);
    mk.appendChild($(`<div class="lbl" style="margin:12px 0 4px">Buy a contract</div>
-     <div class="small muted" style="margin-bottom:8px">A one-off fee to his franchise, then his wage every year after. The ten best men in the ${BB_LEAGUE}.</div>`));
+     <div class="small muted" style="margin-bottom:8px">A one-off fee to his franchise, then his wage every year after. Men with two years or less left on their deal.</div>`));
    targets.forEach(p=>{
      const fee=bbFee(p),okBuy=t.budget>=fee&&f.roster.length<BB_ROSTER;
      const r=$(`<div class="fixt"><span style="flex:1"><b>${p.name}</b>
@@ -8307,8 +8356,7 @@ function viewHoops(w){
    mc.appendChild($(
      line("Ticket sales",money(fin.gate),"gold")+
      line("Sponsorship",money(fin.sponsor),"gold")+
-     (fin.rounds?line(`${BB_CUP} rounds won`,money(fin.rounds),"gold"):"")+
-     (fin.title?line(`${BB_CUP} won`,money(fin.title),"gold"):"")+
+     (fin.rounds?line(`${BB_CUP} prize money`,money(fin.rounds),"gold"):"")+
      line("Player wages",money(-fin.payroll),"injtag")+
      (fin.tax?line("Luxury tax",money(-fin.tax),"injtag"):"")+
      line("Arena, travel, coach, barn",money(-fin.upkeep),"injtag")
@@ -8370,16 +8418,10 @@ function bbAdvanceCard(){
    // one basketball game a week now, so the president's own fixture can be named
    const mf=bbMine();
    if(mf&&G.bb.sched&&G.bb.sched[G.bb.day]){
-     const week=G.bb.sched[G.bb.day];
-     const bits=[];
-     week.forEach(round=>{
-       const tie=round.find(([h,a])=>h===mf.id||a===mf.id);
-       if(tie){const home=tie[0]===mf.id,opp=bbT(home?tie[1]:tie[0]);
-         bits.push(`${home?"":"@ "}${opp?bbTeamName(opp):"\u2014"}`);}
-     });
-     if(bits.length)
+     const tie=G.bb.sched[G.bb.day].find(([h,a])=>h===mf.id||a===mf.id);
+     if(tie){const home=tie[0]===mf.id,opp=bbT(home?tie[1]:tie[0]);
        card.appendChild($(`<div class="row" style="margin-top:4px"><div class="lbl">${BB_LEAGUE}</div>
-         <div class="small">${bits.join(" \u00b7 ")}</div></div>`));
+         <div class="small">${home?"Home":"Away"} vs ${opp?bbTeamName(opp):"\u2014"}</div></div>`));}
    }
    const b=$(`<button class="btn league" style="margin-top:8px;margin-bottom:0">Play matchday ${G.matchday+1} of ${SEASON_LEN}</button>`);
    b.onclick=()=>{playMatchday();render()};card.appendChild(b);
@@ -8537,10 +8579,7 @@ function viewOffice(w){
  // ---- The Prairie League ----
  // Read-only for now. The league runs whether or not the president cares, and this card
  // is where he watches it before he can afford to be part of it.
- if(G.bb&&G.bb.userTeam==null){
-  try{w.appendChild(bbAgentCard());w.appendChild(bbLeagueCard());}
-  catch(e){try{console.error("bb office",e);}catch(_){}}
- }
+ if(G.bb&&G.bb.userTeam==null){w.appendChild(bbAgentCard());w.appendChild(bbLeagueCard());}
 
  // ---- Innovation Lab ----
  {
