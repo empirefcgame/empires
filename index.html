@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Empire FC</title>
 <meta name="description" content="Run a football club. Build a dynasty across four regions.">
-<meta name="theme-color" content="#0d1531">
+<meta name="theme-color" content="#0a0d14">
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./favicon-32.png" sizes="32x32">
 <link rel="apple-touch-icon" href="./apple-touch-icon.png">
@@ -21,145 +21,263 @@
      failed load leaves the game completely unaffected. -->
 <script defer src="https://cloud.umami.is/script.js" data-website-id="a8fbb6a0-8d71-4a8a-bf6d-599359918285"></script>
 <style>
+  /* ==========================================================================
+     Empire FC visual system
+     Ink-dark surfaces, one brass accent, tabular numbers, hairline structure.
+     Colour tokens keep their original names so every inline style still lands.
+     ========================================================================== */
   :root{
-    --night:#0d1531; --night2:#122048; --panel:#16295c; --panel2:#1d3570;
-    --honey:#edbb00; --honey2:#ffd94d; --parch:#f3eedd; --muted:#93a7d6;
-    --line:#2a4383; --grana:#a50044; --cel:#ffd94d; --ter:#c9cdd6; --tel:#d08a4a;
-    --win:#5fd08a; --draw:#d9c25e; --loss:#ff6d94;
+    --night:#0a0d14; --night2:#0e121b; --panel:#131924; --panel2:#1b2230;
+    --honey:#e0af52; --honey2:#ffd88f; --parch:#e9ecf2; --muted:#8b94a6;
+    --line:#232b3a; --hair:rgba(255,255,255,.055);
+    --grana:#b41d4a; --cel:#e6c375; --ter:#c4cad6; --tel:#c2884e;
+    --win:#54d68d; --draw:#cdb264; --loss:#ff7189;
+    --lift:0 1px 2px rgba(0,0,0,.45), 0 10px 28px -20px rgba(0,0,0,.95);
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;padding:0;background:var(--night);color:var(--parch);
-    font-family:"Open Sans",system-ui,sans-serif;font-size:14px;line-height:1.45;overscroll-behavior:none}
+    font-family:"Open Sans",system-ui,sans-serif;font-size:14px;line-height:1.5;
+    overscroll-behavior:none;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
   /* Installed to a home screen the game draws under the status bar and the home
      indicator, so the fixed nav and the scroll floor both need the device insets.
      env() resolves to 0 in a normal browser tab, so this is inert until installed. */
   #app{max-width:520px;margin:0 auto;min-height:100vh;min-height:100dvh;
-    padding-bottom:calc(70px + env(safe-area-inset-bottom))}
+    padding-bottom:calc(74px + env(safe-area-inset-bottom));
+    background:radial-gradient(150% 340px at 50% 0,rgba(224,175,82,.06),transparent 68%)}
   @media(min-width:768px){#app,nav{max-width:740px}}
-  h1,h2,h3{font-weight:800;letter-spacing:.01em;margin:0}
+  h1,h2,h3{font-weight:700;letter-spacing:-.015em;margin:0;line-height:1.25}
   .gold{color:var(--honey)}.muted{color:var(--muted)}.small{font-size:12px}
   .center{text-align:center}
-  table,.big,.scoreline{font-variant-numeric:tabular-nums}
-  header{padding:calc(14px + env(safe-area-inset-top)) 16px 10px;border-bottom:1px solid var(--line);
-    display:flex;align-items:center;gap:12px;position:sticky;top:0;background:var(--night);z-index:5}
-  .crest{width:38px;height:38px;flex:none}
-  header .t{flex:1}
-  header h1{font-size:19px;color:var(--honey);line-height:1.1}
-  header .sub{font-size:11px;color:var(--muted);margin-top:3px;letter-spacing:.06em;text-transform:uppercase}
-  .wrap{padding:14px 14px 20px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+  table,.big,.scoreline,.av{font-variant-numeric:tabular-nums}
+  :focus-visible{outline:2px solid var(--honey);outline-offset:2px;border-radius:6px}
+
+  /* ---- header ---- */
+  header{padding:calc(15px + env(safe-area-inset-top)) 16px 13px;
+    border-bottom:1px solid var(--hair);display:flex;align-items:center;gap:12px;
+    position:sticky;top:0;z-index:5;background:rgba(10,13,20,.82);
+    -webkit-backdrop-filter:blur(18px) saturate(150%);backdrop-filter:blur(18px) saturate(150%)}
+  .crest{width:34px;height:34px;flex:none}
+  header .t{flex:1;min-width:0}
+  header h1{font-size:18px;color:var(--parch);letter-spacing:-.02em}
+  header .sub{font-size:11.5px;color:var(--muted);margin-top:2px;letter-spacing:0;
+    text-transform:none}
+
+  /* ---- surfaces ---- */
+  .wrap{padding:16px 14px 26px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:15px;margin-bottom:10px;box-shadow:var(--lift)}
   .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
-  .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
-  .big{font-size:21px;font-weight:800;color:var(--honey2)}
+  .lbl{font-size:11px;text-transform:none;letter-spacing:0;color:var(--muted);font-weight:600}
+  .big{font-size:24px;font-weight:700;color:var(--parch);letter-spacing:-.025em;line-height:1.15}
   .stat{flex:1;text-align:center}
   /* A stat row where one label wraps to two lines and its neighbours do not used to
      leave the numbers on different baselines. Stretch the cells and pin the value to
      the bottom so the figures always line up however the labels break. */
   .row.statrow{align-items:stretch}
-  .statrow .stat{display:flex;flex-direction:column;justify-content:space-between;gap:4px}
-  .divider{height:1px;background:var(--line);margin:12px 0}
-  button{font-family:inherit;cursor:pointer;border:none;border-radius:8px;font-size:13px}
-  .btn{background:linear-gradient(180deg,var(--honey2),var(--honey));color:#241a00;
-    font-weight:800;padding:12px 16px;width:100%;letter-spacing:.02em}
-  .btn:active{transform:translateY(1px)}
-  .btn.sec{background:var(--panel2);color:var(--parch);border:1px solid var(--line);font-weight:600}
-  /* The three competition buttons are full-width and always sit between cards, so they
-     carry the same bottom gap a card does. The colour key that used to supply that gap
-     under the league button is gone: the button now names the competition outright. */
+  .statrow .stat{display:flex;flex-direction:column;justify-content:space-between;gap:5px}
+  /* Hairline that fades out at both ends instead of butting into the card wall. */
+  .divider{height:1px;border:0;margin:14px 0;
+    background:linear-gradient(90deg,transparent,var(--line) 10%,var(--line) 90%,transparent)}
+
+  /* ---- buttons ---- */
+  button{font-family:inherit;cursor:pointer;border:none;border-radius:10px;font-size:13px;
+    transition:background .15s ease,border-color .15s ease,color .15s ease,box-shadow .15s ease,transform .06s ease}
+  .btn{background:var(--honey);color:#1c1305;font-weight:700;padding:13px 16px;width:100%;
+    letter-spacing:.005em;box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 10px 26px -14px rgba(224,175,82,.85)}
+  @media(hover:hover){.btn:hover{background:var(--honey2)}}
+  .btn:active{transform:translateY(1px);box-shadow:inset 0 1px 0 rgba(255,255,255,.2)}
+  .btn.sec{background:var(--panel2);color:var(--parch);border:1px solid var(--line);
+    font-weight:600;box-shadow:none}
+  @media(hover:hover){.btn.sec:hover{border-color:#33405a;background:#212a3a}}
   /* A button dropped straight into the page flow is followed by a card, so it carries
-     the same bottom gap a card does. Buttons nested inside a card are exempt, which is
-     what the :scope > selector buys. */
-  .wrap > .btn{margin-bottom:12px}
-  .btn.league{background:linear-gradient(180deg,#ffe27a,#e0b93a);color:#241a00;margin-bottom:12px}
-  .btn.cup{background:linear-gradient(180deg,#ff8fc0,#d1447f);color:#3a0820;margin-bottom:12px}
-  .btn.cont{background:linear-gradient(180deg,#7be3a4,#3fa96a);color:#062615;margin-bottom:12px}
-  .btn.sm{padding:7px 11px;width:auto;font-size:12px}
+     the same bottom gap a card does. Buttons nested inside a card are exempt. */
+  .wrap > .btn{margin-bottom:10px}
+  /* The three competition buttons read as tinted glass rather than three loud
+     gradients, so the brass advance button stays the one thing your eye lands on. */
+  .btn.league,.btn.cup,.btn.cont{margin-bottom:10px;box-shadow:none;font-weight:700}
+  .btn.league{background:rgba(224,175,82,.14);border:1px solid rgba(224,175,82,.4);color:var(--honey2)}
+  .btn.cup{background:rgba(180,29,74,.2);border:1px solid rgba(214,72,120,.45);color:#ff9dbf}
+  .btn.cont{background:rgba(84,214,141,.13);border:1px solid rgba(84,214,141,.4);color:#8ee7b4}
+  @media(hover:hover){
+    .btn.league:hover{background:rgba(224,175,82,.22)}
+    .btn.cup:hover{background:rgba(180,29,74,.3)}
+    .btn.cont:hover{background:rgba(84,214,141,.2)}}
+  .btn.sm{padding:8px 12px;width:auto;font-size:12px;border-radius:9px}
   /* compact action buttons that live inside table rows without overflowing a phone */
-  .btn.tiny{padding:5px 8px;width:auto;font-size:11px;white-space:nowrap;min-width:0;line-height:1.1}
+  .btn.tiny{padding:5px 9px;width:auto;font-size:11px;white-space:nowrap;min-width:0;
+    line-height:1.15;border-radius:7px;box-shadow:none}
+  .shoe{font-size:11px;opacity:.85}
   td.act{padding:5px 2px;white-space:nowrap}
   td.act .btn{margin:0}
-  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn:disabled{opacity:.32;cursor:not-allowed;box-shadow:none}
+
+  /* ---- form controls ---- */
   select,input[type=text]{background:var(--panel2);color:var(--parch);border:1px solid var(--line);
-    border-radius:6px;padding:8px;font-size:13px;width:100%;font-family:inherit}
-  table{width:100%;border-collapse:collapse;font-size:12px}
-  th{color:var(--muted);font-weight:600;text-align:right;padding:6px 4px;font-size:10px;
-    text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line)}
+    border-radius:9px;padding:10px 11px;font-size:13px;width:100%;font-family:inherit;
+    transition:border-color .15s ease}
+  input[type=text]::placeholder{color:#5f6a7e}
+  select:focus,input[type=text]:focus{border-color:rgba(224,175,82,.55);outline:none}
+  select{-webkit-appearance:none;appearance:none;padding-right:32px;
+    background-image:url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%238b94a6' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 12px center}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:24px;
+    background:transparent;margin:0}
+  input[type=range]::-webkit-slider-runnable-track{height:5px;border-radius:3px;
+    background:var(--panel2);border:1px solid var(--line)}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;
+    border-radius:50%;background:var(--honey);margin-top:-8.5px;border:2px solid #171d29;
+    box-shadow:0 2px 10px rgba(0,0,0,.65)}
+  input[type=range]::-moz-range-track{height:5px;border-radius:3px;background:var(--panel2);
+    border:1px solid var(--line)}
+  input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;
+    background:var(--honey);border:2px solid #171d29;box-shadow:0 2px 10px rgba(0,0,0,.65)}
+  input[type=range]:disabled::-webkit-slider-thumb{background:var(--muted)}
+  input[type=range]:disabled::-moz-range-thumb{background:var(--muted)}
+
+  /* ---- tables ---- */
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{color:var(--muted);font-weight:600;text-align:right;padding:0 5px 9px;font-size:11px;
+    text-transform:none;letter-spacing:0;border-bottom:1px solid var(--line)}
   th.l,td.l{text-align:left}
-  td{padding:7px 4px;text-align:right;border-bottom:1px solid rgba(56,44,96,.4)}
-  tr.me td{background:rgba(165,0,68,.30);font-weight:700}
-  tr.promo td:first-child{box-shadow:inset 3px 0 0 var(--win)}
-  tr.releg td:first-child{box-shadow:inset 3px 0 0 var(--loss)}
-  .pos{display:inline-block;width:34px;text-align:center;border-radius:4px;font-size:10px;
-    padding:2px 0;font-weight:700}
-  .GK{background:#4a3d1f;color:#f0d58a}.DEF{background:#2b3b52;color:#a9cdf0}
-  .MID{background:#2e4a33;color:#a7e0b4}.FWD{background:#4d2b3a;color:#f0a9c4}
-  .tierbadge{font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:700}
+  th.r,td.r{text-align:right}
+  td{padding:9px 5px;text-align:right;border-bottom:1px solid var(--hair)}
+  tbody tr:last-child td{border-bottom:none}
+  tr.me td{background:rgba(180,29,74,.22);font-weight:700;color:#fff}
+  tr.promo td:first-child{box-shadow:inset 2px 0 0 var(--win)}
+  tr.releg td:first-child{box-shadow:inset 2px 0 0 var(--loss)}
+
+  /* ---- position + tier marks ---- */
+  .pos{display:inline-block;width:37px;text-align:center;border-radius:5px;font-size:10px;
+    padding:3px 0;font-weight:700;letter-spacing:.03em;border:1px solid transparent}
+  .GK{background:rgba(224,175,82,.14);color:#e8c273;border-color:rgba(224,175,82,.3)}
+  .DEF{background:rgba(96,152,222,.14);color:#93bdf0;border-color:rgba(96,152,222,.3)}
+  .MID{background:rgba(84,214,141,.13);color:#84dfae;border-color:rgba(84,214,141,.28)}
+  .FWD{background:rgba(233,106,150,.14);color:#f2a2c0;border-color:rgba(233,106,150,.3)}
+  .tierbadge{font-size:11.5px;letter-spacing:0;text-transform:none;font-weight:700}
   .tier0{color:var(--cel)}.tier1{color:var(--ter)}.tier2{color:var(--tel)}
-  .ret{color:#ff8fb3;font-weight:800;font-size:10px;margin-left:3px}
-  .ageout{color:#ff8fb3;font-weight:800;font-size:10px;margin-left:3px}
+  .ret,.ageout{color:#ff9dbb;font-weight:700;font-size:10px;margin-left:3px}
   .injtag{color:var(--loss);font-size:10px;font-weight:700}
-  nav{position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto;
-    background:var(--night2);border-top:1px solid var(--line);display:flex;z-index:6;
+
+  /* ---- bottom navigation ---- */
+  nav{position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto;z-index:6;
+    background:rgba(13,17,25,.88);-webkit-backdrop-filter:blur(20px) saturate(160%);
+    backdrop-filter:blur(20px) saturate(160%);border-top:1px solid var(--hair);display:flex;
     height:calc(66px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom)}
-  nav button{flex:1;background:none;color:var(--muted);font-size:9px;font-weight:700;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
-    text-transform:uppercase;letter-spacing:.04em;border-radius:0}
-  nav button .ic{font-size:17px;line-height:1}
-  nav button.on{color:var(--honey)}
+  nav button{flex:1;background:none;color:var(--muted);font-size:10px;font-weight:600;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+    text-transform:none;letter-spacing:0;border-radius:0;position:relative;padding:0 2px}
+  nav button .ic{font-size:18px;line-height:1}
+  nav button.on{color:var(--honey2)}
+  /* A short brass rule above the live tab: the one piece of chrome that says where you are. */
+  nav button.on::before{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);
+    width:24px;height:2px;border-radius:0 0 2px 2px;background:var(--honey)}
   nav button.alert,nav button.alert .ic{color:var(--loss)}
-  .start{padding:22px 18px}
-  .teampick{display:flex;justify-content:space-between;align-items:center;padding:11px 12px;
-    border:1px solid var(--line);border-radius:8px;margin-bottom:7px;background:var(--panel);cursor:pointer}
-  .teampick:active{background:var(--panel2)}
-  .pill{display:inline-block;padding:1px 6px;border-radius:999px;font-size:9px;font-weight:800;
-    letter-spacing:.06em;text-transform:uppercase;background:var(--honey);color:#241a00;
-    vertical-align:middle;margin-left:4px}
-  .badge-lg{display:inline-block;padding:3px 9px;border-radius:5px;font-size:10px;font-weight:700;
-    letter-spacing:.08em;text-transform:uppercase;background:var(--grana);color:#fff;border:1px solid transparent}
-  .grp-h{font-weight:800;font-size:14px;margin:16px 0 9px;display:flex;align-items:center;gap:8px}
-  .slider-row{margin:12px 0}
+  nav button.alert.on::before{background:var(--loss)}
+
+  /* ---- start screen ---- */
+  .start{padding:28px 18px calc(28px + env(safe-area-inset-bottom))}
+  .teampick{display:flex;justify-content:space-between;align-items:center;padding:13px 14px;
+    border:1px solid var(--line);border-radius:12px;margin-bottom:8px;background:var(--panel);
+    cursor:pointer;transition:border-color .15s ease,background .15s ease}
+  .teampick:active{background:var(--panel2);border-color:#33405a}
+  @media(hover:hover){.teampick:hover{border-color:#33405a}}
+
+  /* ---- chips and tags ---- */
+  .pill{display:inline-block;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700;
+    letter-spacing:.07em;text-transform:uppercase;background:rgba(224,175,82,.16);
+    color:var(--honey2);border:1px solid rgba(224,175,82,.38);vertical-align:middle;margin-left:5px}
+  .badge-lg{display:inline-block;padding:5px 11px;border-radius:8px;font-size:11px;font-weight:700;
+    letter-spacing:0;text-transform:none;background:var(--grana);color:#fff;border:1px solid transparent}
+  /* A group heading whose rule runs to the edge: the line is the grouping, not decoration. */
+  .grp-h{font-weight:700;font-size:13px;margin:22px 0 10px;display:flex;align-items:center;gap:9px;
+    letter-spacing:.01em}
+  .grp-h::after{content:"";flex:1;height:1px;background:var(--line)}
+  .slider-row{margin:14px 0}
   .slider-row input{width:100%}
-  .ends{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
-  .scoreline{font-size:34px;font-weight:800;color:var(--honey2);text-align:center;letter-spacing:.02em}
-  .fixt{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(56,44,96,.4);font-size:12px}
+  .ends{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);
+    text-transform:none;letter-spacing:0;font-weight:600}
+
+  /* ---- results ---- */
+  .scoreline{font-size:42px;font-weight:700;color:var(--parch);text-align:center;
+    letter-spacing:-.035em;line-height:1.05;margin:2px 0}
+  .fixt{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--hair);
+    font-size:12.5px}
+  .fixt:last-child{border-bottom:none}
   .res-w{color:var(--win)}.res-d{color:var(--draw)}.res-l{color:var(--loss)}
-  .cupfixt{background:rgba(165,0,68,.16);border-left:3px solid var(--grana);padding-left:6px;border-radius:4px}
-  .cupmark{font-size:9px;font-weight:800;color:#ff9dc0;letter-spacing:.08em;width:30px}
+  .cupfixt{background:rgba(180,29,74,.14);border-left:2px solid var(--grana);padding-left:8px;
+    border-radius:6px}
+  .cupmark{font-size:9px;font-weight:700;color:#ff9dbf;letter-spacing:.07em;width:30px}
   .amt-p{color:var(--win)}.amt-n{color:var(--loss)}
-  .logline{padding:7px 0;border-bottom:1px solid rgba(56,44,96,.4);font-size:12px;display:flex;gap:8px;justify-content:space-between}
+  .logline{padding:9px 0;border-bottom:1px solid var(--hair);font-size:12.5px;display:flex;
+    gap:10px;justify-content:space-between}
+  .logline:last-child{border-bottom:none}
   /* A long club name used to push the right-hand span past the card edge, because a
      flex item will not shrink below its content width unless it is told it may. */
   .logline>span{min-width:0;overflow-wrap:anywhere}
-  .logline>span+span{text-align:right}
+  .logline>span+span{text-align:right;flex:none}
+
+  /* ---- tab strips and scrollers ---- */
   /* Equal-width tab strip that cannot overflow: every column is minmax(0,1fr), so the
      buttons shrink with the card instead of running off the side of a phone. */
-  .tabgrid{display:grid;gap:5px;margin-bottom:8px}
-  .tabgrid .btn{width:100%;padding:7px 3px;font-size:11px;white-space:nowrap;
-    overflow:hidden;text-overflow:ellipsis;letter-spacing:0}
-  .histscroll{max-height:300px;overflow-y:auto;-webkit-overflow-scrolling:touch;margin:0 -2px;padding:0 2px}
-  .stars{color:var(--honey);letter-spacing:1px;font-size:11px}
-  .pname{color:var(--honey2);text-decoration:underline;text-decoration-color:rgba(242,201,76,.35);cursor:pointer}
-  .pname.goat{font-weight:800;color:#fff5cf;text-decoration-color:var(--honey)}
-  .goatpill{display:inline-block;padding:1px 6px;border-radius:999px;font-size:9px;font-weight:800;
-    letter-spacing:.06em;background:var(--honey);color:#241a00;margin-right:5px;vertical-align:middle}
-  .famepill{display:inline-block;padding:1px 6px;border-radius:999px;font-size:9px;font-weight:800;
-    letter-spacing:.06em;margin-right:5px;vertical-align:middle}
-  .fame-icon{background:linear-gradient(135deg,#ffd166,#ff8fb3);color:#2a0f1c}
-  .fame-marquee{background:rgba(255,209,102,.18);color:#ffd166;border:1px solid rgba(255,209,102,.45)}
-  .tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -4px;padding:0 4px}
-  .overlay{position:fixed;inset:0;background:rgba(5,9,26,.72);z-index:30;display:flex;align-items:flex-end;justify-content:center}
+  .tabgrid{display:grid;gap:4px;margin-bottom:10px;background:var(--night2);padding:4px;
+    border-radius:11px;border:1px solid var(--line)}
+  .tabgrid .btn{width:100%;padding:8px 4px;font-size:11px;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;letter-spacing:0;border-radius:8px;box-shadow:none;font-weight:600}
+  .tabgrid .btn.sec{background:transparent;border-color:transparent;color:var(--muted)}
+  @media(hover:hover){.tabgrid .btn.sec:hover{background:var(--panel2);border-color:transparent;color:var(--parch)}}
+  .histscroll{max-height:320px;overflow-y:auto;-webkit-overflow-scrolling:touch;margin:0 -2px;padding:0 2px}
+  .tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -6px;padding:0 6px}
+  .histscroll::-webkit-scrollbar,.tscroll::-webkit-scrollbar{width:6px;height:6px}
+  .histscroll::-webkit-scrollbar-thumb,.tscroll::-webkit-scrollbar-thumb{
+    background:#2c3547;border-radius:3px}
+  .histscroll::-webkit-scrollbar-track,.tscroll::-webkit-scrollbar-track{background:transparent}
+
+  /* ---- names, stars, honours ---- */
+  .stars{color:var(--honey);letter-spacing:1.5px;font-size:11px}
+  .pname{color:var(--honey2);text-decoration:underline;text-decoration-thickness:1px;
+    text-underline-offset:2px;text-decoration-color:rgba(255,216,143,.3);cursor:pointer}
+  .pname.goat{font-weight:700;color:#fff3d6;text-decoration-color:var(--honey)}
+  .goatpill,.famepill{display:inline-block;padding:2px 7px;border-radius:999px;font-size:9px;
+    font-weight:700;letter-spacing:.07em;margin-right:5px;vertical-align:middle}
+  .goatpill{background:var(--honey);color:#1c1305}
+  .fame-icon{background:linear-gradient(135deg,#ffd88f,#f2a2c0);color:#2a0f1c}
+  .fame-marquee{background:rgba(224,175,82,.16);color:var(--honey2);border:1px solid rgba(224,175,82,.4)}
+
+  /* ---- bottom sheet ---- */
+  .overlay{position:fixed;inset:0;background:rgba(5,7,12,.7);z-index:30;display:flex;
+    align-items:flex-end;justify-content:center;
+    -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
   @media(min-width:768px){.overlay{align-items:center}}
-  .pcard{background:var(--panel);border:1px solid var(--line);border-radius:14px 14px 0 0;padding:18px;width:100%;max-width:440px;max-height:82vh;overflow:auto}
-  @media(min-width:768px){.pcard{border-radius:14px}}
-  .abar{height:8px;background:var(--night2);border-radius:4px;overflow:hidden;flex:1;margin:0 8px}
-  .abar>div{height:100%;background:linear-gradient(90deg,var(--grana),var(--honey))}
-  .arow{display:flex;align-items:center;font-size:11px;margin:6px 0}
-  .arow .al{width:86px;white-space:nowrap;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+  .pcard{background:var(--panel);border:1px solid var(--line);border-radius:20px 20px 0 0;
+    padding:14px 18px calc(24px + env(safe-area-inset-bottom));width:100%;max-width:440px;
+    max-height:84vh;overflow:auto;box-shadow:0 -20px 60px -30px rgba(0,0,0,1)}
+  /* Grabber: tells you at a glance the sheet came up from the bottom edge. */
+  .pcard::before{content:"";display:block;width:38px;height:4px;border-radius:2px;
+    background:#2c3547;margin:0 auto 16px}
+  @media(min-width:768px){
+    .pcard{border-radius:18px;padding-top:20px}
+    .pcard::before{display:none}}
+
+  /* ---- attribute bars ---- */
+  .abar{height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;flex:1;margin:0 10px}
+  .abar>div{height:100%;background:linear-gradient(90deg,var(--honey),var(--honey2));border-radius:3px}
+  .arow{display:flex;align-items:center;font-size:11.5px;margin:7px 0}
+  .arow .al{width:88px;white-space:nowrap;color:var(--muted);text-transform:capitalize;
+    letter-spacing:0;font-weight:600}
   .arow .av{width:26px;text-align:right;font-weight:700}
-  .toastbox{position:fixed;bottom:78px;left:50%;transform:translateX(-50%);z-index:20;
-    display:flex;flex-direction:column;align-items:center;gap:8px;width:max-content;max-width:92vw;pointer-events:none}
-  .toast{background:var(--panel2);
-    border:1px solid var(--honey);color:var(--parch);padding:10px 16px;border-radius:8px;font-size:12px;max-width:100%}
+
+  /* ---- toasts ---- */
+  .toastbox{position:fixed;bottom:calc(84px + env(safe-area-inset-bottom));left:50%;
+    transform:translateX(-50%);z-index:20;display:flex;flex-direction:column;align-items:center;
+    gap:8px;width:max-content;max-width:92vw;pointer-events:none}
+  .toast{background:rgba(27,34,48,.96);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+    border:1px solid rgba(224,175,82,.45);color:var(--parch);padding:11px 16px;border-radius:11px;
+    font-size:12.5px;max-width:100%;box-shadow:0 12px 32px -16px rgba(0,0,0,1);
+    animation:toastin .22s cubic-bezier(.2,.8,.3,1)}
+  @keyframes toastin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+  @media(prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation-duration:.001ms !important;transition-duration:.001ms !important}}
 </style>
 </head>
 <body>
@@ -6981,13 +7099,13 @@ function ageCell(p){return p.age>=40?`${p.age}<span class="ret">R</span>`:p.age;
 
 function crestSVG(){return `<svg class="crest" viewBox="0 0 48 48" fill="none" role="img" aria-label="Empire FC">
  <path d="M4.8 3.84 H43.2 V21.12 C43.2 36 32.16 42.24 24 45.6 C15.84 42.24 4.8 36 4.8 21.12 Z"
-   fill="#a50044" stroke="#edbb00" stroke-width="1.73" stroke-linejoin="round"/>
+   fill="#b41d4a" stroke="#e0af52" stroke-width="1.73" stroke-linejoin="round"/>
  <path d="M7.3 6.52 H40.7 V21.56 C40.7 34.5 31.1 39.93 24 42.85 C16.9 39.93 7.3 34.5 7.3 21.56 Z"
-   fill="none" stroke="#edbb00" stroke-width="0.58" stroke-linejoin="round"/>
+   fill="none" stroke="#e0af52" stroke-width="0.58" stroke-linejoin="round"/>
  <text x="24" y="21.6" text-anchor="middle" dominant-baseline="central"
    textLength="25" lengthAdjust="spacingAndGlyphs"
    font-family="'Open Sans',system-ui,sans-serif" font-weight="800" font-size="14"
-   fill="#ffd94d">EFC</text></svg>`;}
+   fill="#ffd88f">EFC</text></svg>`;}
 
 /* render() rebuilds the whole page, which used to drop the player at the top of the list
    every time they signed a player, placed a bet or turned a market page. Scroll is kept
@@ -7552,7 +7670,7 @@ function viewClub(w){
   if(f&&r&&r.md===G.matchday){
     const res=r.pf>r.pa?"res-w":"res-l";
     const std=bbStandings(),pos=std.findIndex(x=>x.id===f.id)+1;
-    w.appendChild($(`<div class="card center" style="border-color:#7be3a4">
+    w.appendChild($(`<div class="card center" style="border-color:var(--win)">
       <div class="lbl">${BB_LEAGUE} \u00B7 ${r.home?"Home":"Away"} vs ${r.opp}</div>
       <div class="scoreline ${res}">${r.pf} \u2013 ${r.pa}</div>
       <div class="small ${res}" style="font-weight:700">${r.pf>r.pa?"WON":"LOST"}</div>
