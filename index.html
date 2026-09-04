@@ -905,7 +905,7 @@ function releasePlayerToPool(p){
  joinClub(p,null);                                   // closes the open career spell
  detachPlayer(p);                                    // squad / academy / unhappy / freeAgents
  p.team=null;
- delete p.unhappySince;delete p.promised;
+ delete p.unhappySince;delete p.promised;delete p.promisePaid;
  if(G.xi)G.xi=G.xi.filter(id=>id!==p.id);
  if(!G.freeAgents.includes(p.id))G.freeAgents.push(p.id);
  markWagesDirty();
@@ -917,7 +917,7 @@ function movePlayerToClub(p,team,toAcademy){
  p.team=team.id;
  if(toAcademy){team.academy=team.academy||[];if(!team.academy.includes(p.id))team.academy.push(p.id);}
  else if(!team.squad.includes(p.id))team.squad.push(p.id);
- delete p.unhappySince;delete p.promised;
+ delete p.unhappySince;delete p.promised;delete p.promisePaid;
  markWagesDirty();
  return true;
 }
@@ -1893,10 +1893,14 @@ function coachPickXI(t){
  if(!c)return xi;
  const pool=fit(squadOf(t));
  const inXI=new Set(xi.map(p=>p.id));
+ // A trait bends the selection, but it does not get to break the president's word.
+ // Without this the Youth coach and the Rotator quietly dropped the very player the
+ // club had just promised games to, and the promise broke through nobody's decision.
+ const owed=promiseIds(t);
  if(c.trait==="youth"){
    // an under-23 within 3 OVR of the veteran gets the shirt
    xi=xi.map(p=>{
-     if(p.pos==="GK"||p.age<23)return p;
+     if(p.pos==="GK"||p.age<23||owed.has(p.id))return p;
      const kid=pool.filter(k=>k.pos===p.pos&&k.age<23&&!inXI.has(k.id)&&p.ovr-k.ovr<=3)
        .sort((a,b)=>b.ovr-a.ovr)[0];
      if(kid){inXI.delete(p.id);inXI.add(kid.id);return kid;}
@@ -1905,7 +1909,7 @@ function coachPickXI(t){
  }
  if(c.trait==="rotator"){
    // two outfield starters make way so legs stay fresh
-   shuffle(xi.filter(p=>p.pos!=="GK")).slice(0,2).forEach(st=>{
+   shuffle(xi.filter(p=>p.pos!=="GK"&&!owed.has(p.id))).slice(0,2).forEach(st=>{
      const sub=pool.filter(k=>k.pos===st.pos&&!inXI.has(k.id)&&st.ovr-k.ovr<=8)
        .sort((a,b)=>b.ovr-a.ovr)[0];
      if(sub){const idx=xi.indexOf(st);if(idx>=0){xi[idx]=sub;inXI.delete(st.id);inXI.add(sub.id);}}
@@ -1925,7 +1929,7 @@ function coachRunSetup(){
  if(tier>=2){const f=coachBestFormation();
    if(f!==G.formation)notes.push(`switched to ${f}`);G.formation=f;}
  const xi=coachPickXI(t);
- G.xi=xi.map(p=>p.id);
+ G.xi=slotAlign(xi,G.formation);
  notes.unshift(c.trait==="youth"?"picked an XI with youth in mind"
    :c.trait==="rotator"?"rotated the side to keep legs fresh"
    :"picked your strongest XI");
@@ -1969,7 +1973,11 @@ function autoXI(team,formation,useAll){
  // short of bodies now plays short of bodies and takes the penalty in strength().
  const F=FORMATIONS[formation];
  const pool=useAll?squadOf(team):fit(squadOf(team));
- const by=(a,b)=>b.ovr-a.ovr;
+ // Anyone still owed promised minutes goes to the front of the queue in his own
+ // position, ahead of better players, until the debt is paid. Sorting rather than
+ // swapping keeps the XI in slot order, so the formation never comes out scrambled.
+ const owed=promiseIds(team);
+ const by=(a,b)=>((owed.has(b.id)?1:0)-(owed.has(a.id)?1:0))||(b.ovr-a.ovr);
  const g=pool.filter(p=>p.pos==="GK").sort(by).slice(0,1);
  const d=pool.filter(p=>p.pos==="DEF").sort(by).slice(0,F.DEF);
  const m=pool.filter(p=>p.pos==="MID").sort(by).slice(0,F.MID);
@@ -2127,6 +2135,15 @@ function playMatchday(){
  G.players.forEach(p=>{if(p.inj>0){p.inj--;
    if(_mm&&p.team===G.userTeam&&p.inj>0&&Math.random()<0.5)p.inj--;
    else if(_bio&&p.team===G.userTeam&&p.inj>0&&Math.random()<0.35)p.inj--;}});
+ // The moment a promise is paid off the shirt goes back on merit. Without this the
+ // cached side kept the man in it for the rest of the season, so a debt of four games
+ // quietly cost eighteen. A one-shot latch: the side is dropped once, not every week,
+ // so it does not fight a president who picks the team himself.
+ {const _ut=userTeamObj();
+  if(_ut)squadOf(_ut).forEach(p=>{
+    if(p&&p.promised!=null&&!p.promisePaid&&(p.as||0)>=promiseApps(p)){
+      p.promisePaid=true;G.xi=null;G._coachPlanKey=null;
+    }});}
  // fully delegated: the coach sets the side himself before every kickoff.
  // Runs now that injuries have healed and before the fixture is read, so a
  // Tactician still prepares for this exact opponent.
@@ -3419,6 +3436,25 @@ const FORCED_SALE_DISCOUNT=0.55; // he is sold knowing he wants out
 function unhappyList(t){return((t&&t.unhappy)||[]).map(P).filter(Boolean);}
 function isUnhappy(p){const t=p&&p.team!=null?T(p.team):null;return !!(t&&(t.unhappy||[]).includes(p.id));}
 function forcedFee(p){return Math.max(IN(250000),Math.round(transferFee(p)*FORCED_SALE_DISCOUNT/100000)*100000);}
+/* ---- promised minutes: the president gives his word, the coach keeps it ----
+   Promising a player games used to change nothing about who took the field. The
+   president made the promise and then had to remember to pick the man himself,
+   match after match, or watch him walk out over a promise the club never acted on.
+   The promise is now an instruction to the coach. A player still short of his
+   promised appearances is picked ahead of a better man in his position, and the
+   side is measurably weaker for it until the debt is paid. That weakening IS the
+   price of the promise: you either carry him for a few matches or you sell him.
+   A star was promised a starting role, not a cameo, so he is owed more games than
+   a prospect. Once he reaches the number the coach goes back to picking on merit. */
+function promiseApps(p){return (p&&p.ovr>=DISCONTENT_STAR_OVR)?DISCONTENT_STAR_APPS:DISCONTENT_YOUNG_APPS;}
+function promiseOwed(p){return !!(p&&p.promised!=null&&(p.as||0)<promiseApps(p));}
+function promiseIds(t){
+ // only the president makes promises, so no AI club ever pays this cost
+ const s=new Set();
+ if(!t||t.id!==G.userTeam)return s;
+ squadOf(t).forEach(p=>{if(promiseOwed(p))s.add(p.id)});
+ return s;
+}
 /* Runs at season end, before appearances reset. Flags newly unhappy players and lets
    anyone already unhappy leave for free if he was ignored for another whole season. */
 function discontentTick(){
@@ -3436,10 +3472,10 @@ function discontentTick(){
    // broken promises: you told him he would play and he still didn't. He walks now.
    squadOf(t).slice().forEach(p=>{
      if(!p||p.promised==null)return;
-     const played=(p.as||0)>=DISCONTENT_YOUNG_APPS;
-     if(played){delete p.promised;if(t.id===G.userTeam)awardBadge("kept_promise");return;}   // promise kept
+     const played=(p.as||0)>=promiseApps(p);
+     if(played){delete p.promised;delete p.promisePaid;if(t.id===G.userTeam)awardBadge("kept_promise");return;}   // promise kept
      if(p.promised>=G.season)return;                  // still within his season of grace
-     if(t.squad.length<=SQUAD_MIN){delete p.promised;return;}
+     if(t.squad.length<=SQUAD_MIN){delete p.promised;delete p.promisePaid;return;}
      releasePlayerToPool(p);
      if(t.id===G.userTeam){
        awardBadge("broken_promise");
@@ -3535,9 +3571,16 @@ function placateUnhappy(p){
  const t=userTeamObj();if(!t||!p||!isUnhappy(p))return;
  t.unhappy=(t.unhappy||[]).filter(id=>id!==p.id);   // he is settled for now
  delete p.unhappySince;
- p.promised=G.season;                                // you owe him minutes this season
- logAdd(`You promised ${p.name} more minutes. He stays \u2014 but if he doesn\u2019t play, he will force his way out.`);
- try{toast(`${p.name} will stay \u2014 for now. Play him.`);}catch(e){}
+ p.promised=G.season;delete p.promisePaid;          // you owe him minutes this season
+ // The promise is an order, not a hope. Clear the cached side so the coach picks
+ // again immediately with the man in it, instead of the president having to
+ // remember to select him every week for a promise the club already made.
+ G.xi=null;G._coachPlanKey=null;
+ if(G.coachAuto&&coachTier()>0){coachRunSetup();G._coachPlanKey=coachPlanKey();}
+ else ensureXI();
+ const need=promiseApps(p);
+ logAdd(`You promised ${p.name} more minutes. ${G.coach?G.coach.name:"Your coach"} will start him until he has ${need} appearances.`);
+ try{toast(`${p.name} is in the side. ${need} games owed.`);}catch(e){}
  saveGame(true);render();
 }
 /* ================= Player contracts & wage demands (Empire FC 2) =================
@@ -6678,9 +6721,28 @@ function slotList(formation){
  const F=FORMATIONS[formation];const s=["GK"];
  for(let i=0;i<F.DEF;i++)s.push("DEF");for(let i=0;i<F.MID;i++)s.push("MID");
  for(let i=0;i<F.FWD;i++)s.push("FWD");return s;}
+/* The Starting XI screen reads G.xi by slot index, so what is stored has to line up
+   with slotList(): if index 8 is a forward slot, index 8 must hold the forward. A club
+   short of forwards fields whoever is left, and that stand-in used to be appended to
+   the end of the picked side, which pushed every later slot out of step. The screen
+   then filtered that slot's dropdown by a position nobody in it played, drew a box with
+   nothing in it, and an available forward sitting on the bench was never offered.
+   Everything that writes G.xi now runs the picked side through here first. The sim is
+   untouched: it reads a compact list of players and never looks at slot order. */
+function slotAlign(xi,formation){
+ const slots=slotList(formation),out=new Array(slots.length).fill(null);
+ const left=(xi||[]).filter(Boolean).slice();
+ slots.forEach((pos,i)=>{
+   const k=left.findIndex(p=>p.pos===pos);
+   if(k>=0)out[i]=left.splice(k,1)[0].id;
+ });
+ // whoever is left plays out of position, in the slots nobody could fill properly
+ slots.forEach((pos,i)=>{if(out[i]==null&&left.length)out[i]=left.shift().id;});
+ return out;
+}
 function ensureXI(){
- if(G.xi&&G.xi.length===11&&G.xi.every(id=>PM.has(id)&&P(id).team===G.userTeam))return;
- G.xi=autoXI(userTeamObj(),G.formation).map(p=>p.id);
+ if(G.xi&&G.xi.length===11&&G.xi.every(id=>id!=null&&PM.has(id)&&P(id).team===G.userTeam))return;
+ G.xi=slotAlign(autoXI(userTeamObj(),G.formation),G.formation);
 }
 function userStartXI(){
  ensureXI();
@@ -7906,7 +7968,7 @@ function viewSquad(w){
  const fc=$(`<div class="card"></div>`);
  fc.appendChild($(`<div class="lbl">Formation${lockForm?' \u00B7 set by coach':''}</div>`));
  const fsel=$(`<select style="margin-top:6px" ${lockForm?'disabled':''}>${Object.keys(FORMATIONS).map(f=>`<option ${f===G.formation?'selected':''}>${f}</option>`).join("")}</select>`);
- fsel.onchange=()=>{G.formation=fsel.value;G.xi=autoXI(userTeamObj(),G.formation).map(p=>p.id);render()};
+ fsel.onchange=()=>{G.formation=fsel.value;G.xi=slotAlign(autoXI(userTeamObj(),G.formation),G.formation);render()};
  fc.appendChild(fsel);
  [["mentality","Defensive","Attacking"],["pressing","Low block","High press"],
    ["tempo","Slow tempo","Fast tempo"],["width","Narrow","Wide"],
@@ -7941,15 +8003,31 @@ function viewSquad(w){
  }
  const slots=slotList(G.formation);
  const used=new Set(G.xi);
+ const _ut3=userTeamObj();
+ // Availability is one rule, used in one place. The old filter checked injury and
+ // suspension but not a national call-up, so a man his country had taken could be
+ // picked and was then silently dropped at kickoff.
+ const _free=q=>q&&q.inj<=0&&(q.susp||0)<=0&&!q.natDuty;
+ const _flag=q=>q.inj>0?" \u00B7 INJ":(q.susp||0)>0?" \u00B7 BAN":q.natDuty?" \u00B7 CALL-UP":"";
  slots.forEach((pos,idx)=>{
-   const cur=G.xi[idx];
-   const opts=squadOf(userTeamObj()).filter(p=>p.pos===pos&&p.inj<=0&&(p.susp||0)<=0&&(!used.has(p.id)||p.id===cur))
-     .sort((a,b)=>b.ovr-a.ovr);
-   const curP=P(cur);
-   if(curP&&curP.inj>0&&!opts.find(p=>p.id===cur))opts.unshift(curP);
+   const cur=G.xi[idx],curP=P(cur);
+   // Own position first, then everyone else who is free. A slot is a shape on the
+   // team sheet, not a rule about who may stand in it: the match engine rates a man
+   // by the position he plays, so a forward in a midfield slot is still a forward.
+   // Listing only exact matches is what left a slot with an empty, unusable box.
+   const open=q=>!used.has(q.id)||q.id===cur;
+   const sq=squadOf(_ut3);
+   let opts=sq.filter(q=>q.pos===pos&&_free(q)&&open(q)).sort((a,b)=>b.ovr-a.ovr)
+     .concat(sq.filter(q=>q.pos!==pos&&_free(q)&&open(q)).sort((a,b)=>b.ovr-a.ovr));
+   // last resort, exactly as the auto pick does it: a fit academy player
+   if(!opts.length)opts=fit(academyOf(_ut3)).filter(open).sort((a,b)=>b.ovr-a.ovr);
+   if(curP&&!opts.some(q=>q.id===cur))opts.unshift(curP);   // whoever is standing there, fit or not
    const row=$(`<div class="row" style="margin:6px 0"><span class="pos ${pos}">${pos}</span></div>`);
-   const sel=$(`<select style="flex:1;margin-left:8px" ${lockXI?'disabled':''}>${opts.map(p=>`<option value="${p.id}" ${p.id===cur?'selected':''}>${p.name} \u00B7 ${p.ovr} \u00B7 ${p.age}y${p.inj>0?" \u00B7 INJ":""}</option>`).join("")}</select>`);
-   sel.onchange=()=>{G.xi[idx]=+sel.value;render()};
+   const body=opts.length
+     ? opts.map(p=>`<option value="${p.id}" ${p.id===cur?'selected':''}>${p.name} \u00B7 ${p.pos!==pos?p.pos+" ":""}${p.ovr} \u00B7 ${p.age}y${_flag(p)}</option>`).join("")
+     : `<option value="">Nobody available</option>`;
+   const sel=$(`<select style="flex:1;margin-left:8px" ${lockXI||!opts.length?'disabled':''}>${body}</select>`);
+   sel.onchange=()=>{if(!sel.value)return;G.xi[idx]=+sel.value;render()};
    row.appendChild(sel);xc.appendChild(row);
  });
  w.appendChild(xc);
@@ -7959,7 +8037,7 @@ function viewSquad(w){
   if(un.length){
     const uc=$(`<div class="card" style="border:1px solid var(--loss)"></div>`);
     uc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px;color:var(--loss)">\u26A0\uFE0F Asking to leave (${un.length})</h3>`));
-    uc.appendChild($(`<div class="small muted" style="margin-bottom:8px">Transfer requests over lack of minutes. Sell cheap now, or promise them games. Break the promise and they leave for nothing.</div>`));
+    uc.appendChild($(`<div class="small muted" style="margin-bottom:8px">Transfer requests over lack of minutes. Sell cheap now, or promise them games. Your coach starts anyone you promise until the games are paid off, whatever it costs the side.</div>`));
     un.forEach(p=>{
       const why=p.age<DISCONTENT_YOUNG_AGE?`only ${p.as||0} apps at ${p.age} \u2014 his development is stalling`
         :`a ${p.ovr} OVR player with ${p.as||0} apps \u2014 he expects to start`;
@@ -7979,10 +8057,10 @@ function viewSquad(w){
   if(owed.length){
     const pc=$(`<div class="card"></div>`);
     pc.appendChild($(`<h3 style="font-size:15px;margin-bottom:4px">\uD83E\uDD1D Promised minutes (${owed.length})</h3>`));
-    pc.appendChild($(`<div class="small muted" style="margin-bottom:6px">Give them ${DISCONTENT_YOUNG_APPS}+ appearances this season or they leave for nothing.</div>`));
+    pc.appendChild($(`<div class="small muted" style="margin-bottom:6px">${G.coach?G.coach.name:"Your coach"} starts these players ahead of better ones until the games are paid off. The side is weaker while the debt stands.</div>`));
     owed.forEach(p=>{
-      const ok=(p.as||0)>=DISCONTENT_YOUNG_APPS;
-      pc.appendChild($(`<div class="small" style="margin-bottom:3px"><span class="pname" data-p="${p.id}">${p.name}</span> \u00B7 <b class="${ok?'res-w':'res-l'}">${p.as||0}</b>/${DISCONTENT_YOUNG_APPS} apps ${ok?"\u2014 promise kept":"\u2014 still owed minutes"}</div>`));
+      const need=promiseApps(p),ok=(p.as||0)>=need;
+      pc.appendChild($(`<div class="small" style="margin-bottom:3px"><span class="pname" data-p="${p.id}">${p.name}</span> \u00B7 <b class="${ok?'res-w':'res-l'}">${p.as||0}</b>/${need} apps ${ok?"\u2014 promise kept":"\u2014 in the side until paid"}</div>`));
     });
     wireNames(pc);w.appendChild(pc);
   }}
